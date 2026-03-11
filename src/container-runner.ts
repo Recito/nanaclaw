@@ -88,11 +88,16 @@ function buildVolumeMounts(
       });
     }
 
+    // Shadow directories that contain sensitive data.
+    // Use an empty directory (not /dev/null, which is a file).
+    const emptyDir = path.join(DATA_DIR, 'empty-shadow');
+    fs.mkdirSync(emptyDir, { recursive: true, mode: 0o700 });
+
     // Shadow store/ (contains messages.db with all channel history)
     const storeDir = path.join(projectRoot, 'store');
     if (fs.existsSync(storeDir)) {
       mounts.push({
-        hostPath: '/dev/null',
+        hostPath: emptyDir,
         containerPath: '/workspace/project/store',
         readonly: true,
       });
@@ -102,7 +107,7 @@ function buildVolumeMounts(
     const gitDir = path.join(projectRoot, '.git');
     if (fs.existsSync(gitDir)) {
       mounts.push({
-        hostPath: '/dev/null',
+        hostPath: emptyDir,
         containerPath: '/workspace/project/.git',
         readonly: true,
       });
