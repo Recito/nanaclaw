@@ -34,7 +34,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   ipcWatcherRunning = true;
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
-  fs.mkdirSync(ipcBaseDir, { recursive: true });
+  fs.mkdirSync(ipcBaseDir, { recursive: true, mode: 0o700 });
 
   const processIpcFiles = async () => {
     // Scan all group IPC directories (identity determined by directory)
@@ -74,6 +74,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
+                // Cap message length to prevent abuse or runaway agents
+                const MAX_IPC_MESSAGE_LENGTH = 10_000;
+                if (data.text.length > MAX_IPC_MESSAGE_LENGTH) {
+                  data.text = data.text.slice(0, MAX_IPC_MESSAGE_LENGTH) + '… [truncated]';
+                }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (

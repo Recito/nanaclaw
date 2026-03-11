@@ -76,13 +76,34 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
+    // Shadow sensitive paths so the agent cannot read secrets or history
+    // from the mounted project root. Credentials are injected by the
+    // credential proxy, never exposed to containers.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
         hostPath: '/dev/null',
         containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
+    // Shadow store/ (contains messages.db with all channel history)
+    const storeDir = path.join(projectRoot, 'store');
+    if (fs.existsSync(storeDir)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/store',
+        readonly: true,
+      });
+    }
+
+    // Shadow .git/ (may contain historical secrets in pack objects)
+    const gitDir = path.join(projectRoot, '.git');
+    if (fs.existsSync(gitDir)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.git',
         readonly: true,
       });
     }
