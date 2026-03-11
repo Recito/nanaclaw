@@ -1,6 +1,6 @@
-# NanoClaw
+# nanaclaw
 
-Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
+Personal AI companion built on NanoClaw. See [README.md](README.md) for setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions. Upstream: [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw).
 
 ## Quick Context
 
