@@ -77,7 +77,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 // Cap message length to prevent abuse or runaway agents
                 const MAX_IPC_MESSAGE_LENGTH = 10_000;
                 if (data.text.length > MAX_IPC_MESSAGE_LENGTH) {
-                  data.text = data.text.slice(0, MAX_IPC_MESSAGE_LENGTH) + '… [truncated]';
+                  data.text =
+                    data.text.slice(0, MAX_IPC_MESSAGE_LENGTH) +
+                    '… [truncated]';
                 }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
