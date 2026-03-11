@@ -107,7 +107,17 @@ Each skill will:
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 6.
+**After all channel skills complete**, continue to step 5b.
+
+## 5b. Persona Setup
+
+AskUserQuestion: Want to customize your assistant's personality?
+- Yes — run `/persona` to walk through guided persona builder
+- Skip — use default personality (can run `/persona` anytime later)
+
+If yes, invoke the `/persona` skill. It will handle the full questionnaire and write the CLAUDE.md files.
+
+**After persona setup completes**, continue to step 6.
 
 ## 6. Mount Allowlist
 
