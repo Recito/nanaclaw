@@ -162,7 +162,56 @@ If the name changed, update `ASSISTANT_NAME` in `.env`:
 # Read current .env, update or add ASSISTANT_NAME
 ```
 
-### 4. Clear sessions
+### 4. Refactor agent skills to match new persona
+
+Agent skills in `container/skills/` may contain hardcoded persona references (name, personality traits, example phrases, user nicknames). After writing the CLAUDE.md files, scan and update ALL agent skills.
+
+**Step 1 — Identify affected skills:**
+
+```bash
+grep -rl "OLD_NAME\|OLD_NICKNAME\|OLD_PERSONALITY_KEYWORDS" container/skills/ --include="*.md"
+```
+
+Replace `OLD_NAME` with the previous assistant name, `OLD_NICKNAME` with the previous user nickname, and `OLD_PERSONALITY_KEYWORDS` with previous persona traits. If this is a fresh install, there may be nothing to replace.
+
+**Step 2 — For each affected skill file, update:**
+
+| What to find | Replace with |
+|-------------|-------------|
+| Old assistant name (e.g. "nana") | New assistant name |
+| Old user nickname (e.g. "老王", "哥") | New user nickname |
+| Old persona description (e.g. "傲娇毒舌小妹") | New persona description |
+| Persona reminder sections | Regenerate based on new persona (same structure, new content) |
+| Example messages/phrases in the old voice | Regenerate examples in the new voice |
+| Self-copying task prompts (check-in, etc.) | Regenerate with new PERSONA line |
+
+**Step 3 — Specific files to check:**
+
+These skills are known to embed persona-specific content:
+
+- `container/skills/check-in/SKILL.md` — Has a "Persona Reminder" section, voice examples, a self-copying task prompt with embedded PERSONA line. Regenerate all of these to match the new persona.
+- `container/skills/memo/SKILL.md` — Has example roast phrases and persona-specific commentary instructions. Update to match new voice.
+
+Also scan any other skills that may have been added since this list was written:
+
+```bash
+grep -rn "PERSONA\|personality\|voice\|tone\|roast\|example" container/skills/ --include="*.md" -l
+```
+
+**Step 4 — Reseed active scheduled tasks:**
+
+Self-copying task prompts (like check-in) carry the OLD persona in their prompt text. The chain won't pick up skill file changes on its own. After updating skill files:
+
+1. Find active self-copying tasks:
+   ```bash
+   sqlite3 store/messages.db "SELECT id, substr(prompt, 1, 60) FROM scheduled_tasks WHERE status = 'active' AND prompt LIKE '%NANOCLAW_%';"
+   ```
+2. Cancel them
+3. Reseed each with the updated prompt from the skill file
+
+**IMPORTANT:** Don't just find-and-replace blindly. The example phrases and voice should be *regenerated* to sound natural in the new persona, not mechanically substituted. A 傲娇 roast doesn't become a 撒娇 tease by swapping names — the whole line needs to be rewritten.
+
+### 5. Clear sessions
 
 Clear all sessions so every channel picks up the new persona fresh:
 
@@ -170,7 +219,7 @@ Clear all sessions so every channel picks up the new persona fresh:
 sqlite3 store/messages.db "DELETE FROM sessions;"
 ```
 
-### 5. Restart
+### 6. Restart
 
 ```bash
 npm run build
