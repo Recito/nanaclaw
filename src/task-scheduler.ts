@@ -1,13 +1,14 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
-  runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runAgent } from './agent-dispatch.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -20,6 +21,10 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+// Memory decay runs once per day (24h in ms)
+const MEMORY_DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let lastDecayRun = 0;
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -169,7 +174,7 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const output = await runAgent(
       group,
       {
         prompt: task.prompt,
@@ -270,10 +275,62 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
       logger.error({ err }, 'Error in scheduler loop');
     }
 
+    // Run memory decay once per day
+    await runMemoryDecay();
+
     setTimeout(loop, SCHEDULER_POLL_INTERVAL);
   };
 
   loop();
+}
+
+/**
+ * Run memory decay across all group directories that have a memory.db.
+ * Archives memories not accessed in 180 days with fewer than 3 accesses.
+ * Runs at most once per MEMORY_DECAY_INTERVAL_MS.
+ */
+async function runMemoryDecay(): Promise<void> {
+  const now = Date.now();
+  if (now - lastDecayRun < MEMORY_DECAY_INTERVAL_MS) return;
+  lastDecayRun = now;
+
+  try {
+    const { getMemoryDb } = await import('./memory/db.js');
+    const { decayOldMemories } = await import('./memory/repository.js');
+
+    const groupDirs = fs.readdirSync(GROUPS_DIR).filter((d) => {
+      try {
+        const dbPath = path.join(GROUPS_DIR, d, 'memory.db');
+        return fs.existsSync(dbPath);
+      } catch {
+        return false;
+      }
+    });
+
+    let totalArchived = 0;
+    for (const folder of groupDirs) {
+      try {
+        const groupDir = path.join(GROUPS_DIR, folder);
+        const db = getMemoryDb(groupDir);
+        const archived = decayOldMemories(db, folder);
+        if (archived > 0) {
+          totalArchived += archived;
+          logger.info(
+            { group: folder, archived },
+            'Memory decay archived old memories',
+          );
+        }
+      } catch (err) {
+        logger.debug({ err, group: folder }, 'Memory decay failed for group');
+      }
+    }
+
+    if (totalArchived > 0) {
+      logger.info({ totalArchived }, 'Memory decay cycle complete');
+    }
+  } catch (err) {
+    logger.debug({ err }, 'Memory decay module not available');
+  }
 }
 
 /** @internal - for tests only. */

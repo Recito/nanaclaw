@@ -28,10 +28,38 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { getMemoryDb } from './memory/db.js';
+import { buildMemoryContext } from './memory/context-builder.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+/**
+ * Initialize per-group memory DB and write memory context file for auto-injection.
+ */
+function initMemoryForAgent(
+  groupFolder: string,
+  groupDir: string,
+  prompt: string,
+): void {
+  try {
+    // Ensure memory.db exists (schema applied on open)
+    getMemoryDb(groupDir);
+
+    // Build and write context file
+    const context = buildMemoryContext(groupFolder, prompt, groupDir);
+    const contextPath = path.join(groupDir, 'memory_context.md');
+    if (context) {
+      fs.writeFileSync(contextPath, context);
+    } else {
+      // Remove stale context file
+      try { fs.unlinkSync(contextPath); } catch { /* ignore */ }
+    }
+  } catch (err) {
+    logger.debug({ err, groupFolder }, 'Failed to initialize memory for agent');
+  }
+}
 
 export interface ContainerInput {
   prompt: string;
@@ -300,6 +328,9 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  // Initialize per-group memory database and build context
+  initMemoryForAgent(group.folder, groupDir, input.prompt);
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

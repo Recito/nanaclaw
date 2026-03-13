@@ -7,17 +7,46 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { CronExpressionParser } from 'cron-parser';
 
-const IPC_DIR = '/workspace/ipc';
+const IPC_DIR = process.env.NANOCLAW_IPC_BASE_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
+
+// Memory database (per-group, mounted at /workspace/group/memory.db or via env)
+const MEMORY_DB_PATH = process.env.NANOCLAW_MEMORY_DB || '/workspace/group/memory.db';
+const MEMORY_TYPES = ['profile', 'event', 'knowledge', 'behavior', 'preference', 'skill'] as const;
+type MemoryType = typeof MEMORY_TYPES[number];
+
+function getMemoryDb(): Database.Database | null {
+  try {
+    const db = new Database(MEMORY_DB_PATH);
+    db.pragma('journal_mode = WAL');
+    return db;
+  } catch {
+    return null;
+  }
+}
+
+function memoryContentHash(summary: string, memoryType: string): string {
+  const normalized = `${summary.trim().toLowerCase().replace(/\s+/g, ' ')}|${memoryType}`;
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+}
+
+function memorySalienceScore(accessCount: number, lastAccessedAt: string): number {
+  const daysAgo = (Date.now() - new Date(lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
+  const recency = daysAgo <= 0 ? 1.0 : Math.exp(-0.693 / 30 * daysAgo);
+  const reinforcement = Math.log(Math.max(accessCount, 1) + 1);
+  return reinforcement * recency;
+}
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
 function writeIpcFile(dir: string, data: object): string {
@@ -330,6 +359,276 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+// --- Memory Tools ---
+
+server.tool(
+  'remember',
+  `Store a memory about the user, a fact, preference, or anything worth retaining across conversations.
+
+Memory types:
+• profile: User characteristics, demographics, identity (name, age, role)
+• event: Significant occurrences, milestones, notable happenings
+• knowledge: Facts, learned information, understanding about topics
+• behavior: Patterns, habits, routines, recurring actions
+• preference: Likes, dislikes, choices, style preferences
+• skill: User capabilities, competencies, expertise
+
+Rules:
+• Only store user-stated facts — not your suggestions or assumptions
+• Each memory must be self-contained (understandable without conversation context)
+• Don't store temporary/ephemeral info (current weather, today's mood)
+• Preserve the user's language when possible
+• If you store a fact that already exists, it will be reinforced (not duplicated)`,
+  {
+    summary: z.string().describe('The fact or information to remember. Should be a clear, self-contained statement.'),
+    memory_type: z.enum(MEMORY_TYPES).default('knowledge').describe('Category of memory'),
+    category: z.string().optional().describe('Optional topic tag (e.g., "food", "work", "family")'),
+  },
+  async (args) => {
+    const db = getMemoryDb();
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
+    }
+
+    try {
+      const contentHash = memoryContentHash(args.summary, args.memory_type);
+      const now = new Date().toISOString();
+
+      // Check for duplicate
+      const existing = db.prepare(
+        `SELECT id, access_count FROM memory_items WHERE content_hash = ? AND group_folder = ? AND status = 'active'`
+      ).get(contentHash, groupFolder) as { id: string; access_count: number } | undefined;
+
+      if (existing) {
+        db.prepare(
+          `UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, last_reinforced_at = ?, updated_at = ? WHERE id = ?`
+        ).run(now, now, now, existing.id);
+        return {
+          content: [{ type: 'text' as const, text: `Memory reinforced (seen ${existing.access_count + 1}x): "${args.summary}"` }],
+        };
+      }
+
+      const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(
+        `INSERT INTO memory_items (id, group_folder, memory_type, summary, content_hash, access_count, last_accessed_at, last_reinforced_at, created_at, updated_at, category, is_global, status, extra)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, 'active', NULL)`
+      ).run(id, groupFolder, args.memory_type, args.summary, contentHash, now, now, now, now, args.category || null);
+
+      return { content: [{ type: 'text' as const, text: `Remembered [${args.memory_type}]: "${args.summary}"` }] };
+    } finally {
+      db.close();
+    }
+  },
+);
+
+server.tool(
+  'recall',
+  `Search your memories for relevant information. Returns memories ranked by relevance and importance.
+
+Use this when you need to look up something you've previously stored — user preferences, facts, past events, etc. Relevant memories are also auto-injected into your context, so you only need this for specific targeted searches.`,
+  {
+    query: z.string().describe('What to search for (keywords or natural language)'),
+    memory_type: z.enum(MEMORY_TYPES).optional().describe('Filter by memory type'),
+    limit: z.number().default(10).describe('Maximum results to return'),
+  },
+  async (args) => {
+    const db = getMemoryDb();
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
+    }
+
+    try {
+      const limit = Math.min(args.limit, 25);
+      const typeFilter = args.memory_type ? `AND m.memory_type = '${args.memory_type}'` : '';
+
+      // FTS5 search
+      const rows = db.prepare(
+        `SELECT m.*, rank FROM memory_fts f
+         JOIN memory_items m ON m.rowid = f.rowid
+         WHERE memory_fts MATCH ? AND m.group_folder = ? AND m.status = 'active' ${typeFilter}
+         ORDER BY rank LIMIT ?`
+      ).all(args.query, groupFolder, limit * 3) as (Record<string, unknown> & { rank: number })[];
+
+      if (rows.length === 0) {
+        // Fallback: simple LIKE search
+        const likeRows = db.prepare(
+          `SELECT * FROM memory_items
+           WHERE group_folder = ? AND status = 'active' AND summary LIKE ? ${typeFilter}
+           ORDER BY last_accessed_at DESC LIMIT ?`
+        ).all(groupFolder, `%${args.query}%`, limit) as Record<string, unknown>[];
+
+        if (likeRows.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No memories found matching your query.' }] };
+        }
+
+        // Touch accessed items
+        const now = new Date().toISOString();
+        for (const row of likeRows) {
+          db.prepare(`UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?`)
+            .run(now, now, row.id);
+        }
+
+        const formatted = likeRows.map((r) =>
+          `• [${r.memory_type}] ${r.summary} (accessed ${r.access_count}x${r.category ? `, #${r.category}` : ''})`
+        ).join('\n');
+        return { content: [{ type: 'text' as const, text: `Memories (${likeRows.length} found):\n${formatted}` }] };
+      }
+
+      // Score and rank by salience
+      interface ScoredRow { id: string; memory_type: string; summary: string; access_count: number; last_accessed_at: string; category: string | null; salience: number; }
+      const scored: ScoredRow[] = rows.map((row) => ({
+        id: row.id as string,
+        memory_type: row.memory_type as string,
+        summary: row.summary as string,
+        access_count: row.access_count as number,
+        last_accessed_at: row.last_accessed_at as string,
+        category: (row.category as string) || null,
+        salience: memorySalienceScore(row.access_count as number, row.last_accessed_at as string),
+      }));
+      scored.sort((a, b) => b.salience - a.salience);
+      const top = scored.slice(0, limit);
+
+      // Touch accessed items
+      const now = new Date().toISOString();
+      for (const row of top) {
+        db.prepare(`UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?`)
+          .run(now, now, row.id);
+      }
+
+      const formatted = top.map((r) =>
+        `• [${r.memory_type}] ${r.summary} (accessed ${r.access_count + 1}x, salience: ${r.salience.toFixed(2)}${r.category ? `, #${r.category}` : ''})`
+      ).join('\n');
+
+      return { content: [{ type: 'text' as const, text: `Memories (${top.length} found):\n${formatted}` }] };
+    } finally {
+      db.close();
+    }
+  },
+);
+
+server.tool(
+  'forget',
+  'Remove a specific memory. Use when the user asks you to forget something or when information is outdated.',
+  {
+    query: z.string().describe('Search query to find the memory to forget, or the memory ID (mem-...) for exact match'),
+  },
+  async (args) => {
+    const db = getMemoryDb();
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
+    }
+
+    try {
+      // Try exact ID match first
+      if (args.query.startsWith('mem-')) {
+        const result = db.prepare(
+          `DELETE FROM memory_items WHERE id = ? AND group_folder = ?`
+        ).run(args.query, groupFolder);
+        if (result.changes > 0) {
+          return { content: [{ type: 'text' as const, text: `Forgot memory ${args.query}.` }] };
+        }
+      }
+
+      // FTS search to find matching memories
+      const rows = db.prepare(
+        `SELECT m.id, m.summary, m.memory_type FROM memory_fts f
+         JOIN memory_items m ON m.rowid = f.rowid
+         WHERE memory_fts MATCH ? AND m.group_folder = ? AND m.status = 'active'
+         ORDER BY rank LIMIT 5`
+      ).all(args.query, groupFolder) as { id: string; summary: string; memory_type: string }[];
+
+      if (rows.length === 0) {
+        // Fallback LIKE
+        const likeRows = db.prepare(
+          `SELECT id, summary, memory_type FROM memory_items
+           WHERE group_folder = ? AND status = 'active' AND summary LIKE ?
+           LIMIT 5`
+        ).all(groupFolder, `%${args.query}%`) as { id: string; summary: string; memory_type: string }[];
+
+        if (likeRows.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No matching memories found to forget.' }] };
+        }
+
+        if (likeRows.length === 1) {
+          db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(likeRows[0].id);
+          return { content: [{ type: 'text' as const, text: `Forgot: [${likeRows[0].memory_type}] "${likeRows[0].summary}"` }] };
+        }
+
+        const list = likeRows.map((r) => `  ${r.id}: [${r.memory_type}] ${r.summary}`).join('\n');
+        return { content: [{ type: 'text' as const, text: `Multiple matches found. Call forget again with the exact ID:\n${list}` }] };
+      }
+
+      if (rows.length === 1) {
+        db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(rows[0].id);
+        return { content: [{ type: 'text' as const, text: `Forgot: [${rows[0].memory_type}] "${rows[0].summary}"` }] };
+      }
+
+      const list = rows.map((r) => `  ${r.id}: [${r.memory_type}] ${r.summary}`).join('\n');
+      return { content: [{ type: 'text' as const, text: `Multiple matches found. Call forget again with the exact ID:\n${list}` }] };
+    } finally {
+      db.close();
+    }
+  },
+);
+
+server.tool(
+  'list_memories',
+  'List all stored memories, optionally filtered by type or category. Shows memory counts and summaries.',
+  {
+    memory_type: z.enum(MEMORY_TYPES).optional().describe('Filter by memory type'),
+    category: z.string().optional().describe('Filter by category tag'),
+  },
+  async (args) => {
+    const db = getMemoryDb();
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
+    }
+
+    try {
+      let sql = `SELECT * FROM memory_items WHERE group_folder = ? AND status = 'active'`;
+      const params: unknown[] = [groupFolder];
+
+      if (args.memory_type) {
+        sql += ` AND memory_type = ?`;
+        params.push(args.memory_type);
+      }
+      if (args.category) {
+        sql += ` AND category = ?`;
+        params.push(args.category);
+      }
+      sql += ` ORDER BY last_accessed_at DESC LIMIT 50`;
+
+      const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
+
+      if (rows.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No memories stored.' }] };
+      }
+
+      // Group count by type
+      const countByType = db.prepare(
+        `SELECT memory_type, COUNT(*) as count FROM memory_items WHERE group_folder = ? AND status = 'active' GROUP BY memory_type`
+      ).all(groupFolder) as { memory_type: string; count: number }[];
+
+      const totalCount = countByType.reduce((sum, r) => sum + r.count, 0);
+      const typeSummary = countByType.map((r) => `${r.memory_type}: ${r.count}`).join(', ');
+
+      const formatted = rows.map((r) => {
+        const salience = memorySalienceScore(r.access_count as number, r.last_accessed_at as string);
+        return `• [${r.memory_type}] ${r.summary} (${r.access_count}x, salience: ${salience.toFixed(2)}${r.category ? `, #${r.category}` : ''})`;
+      }).join('\n');
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Memories: ${totalCount} total (${typeSummary})\n\n${formatted}`,
+        }],
+      };
+    } finally {
+      db.close();
+    }
   },
 );
 

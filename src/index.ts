@@ -17,10 +17,10 @@ import {
 } from './channels/registry.js';
 import {
   ContainerOutput,
-  runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runAgent as dispatchAgent } from './agent-dispatch.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -306,7 +306,7 @@ async function runAgent(
     : undefined;
 
   try {
-    const output = await runContainerAgent(
+    const output = await dispatchAgent(
       group,
       {
         prompt,

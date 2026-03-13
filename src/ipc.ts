@@ -439,7 +439,8 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC
+        // Defense in depth: agents cannot set isMain, execution, or hostConfig via IPC.
+        // These are admin-only fields that control privilege levels and host access.
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,

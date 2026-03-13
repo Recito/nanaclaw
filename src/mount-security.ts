@@ -173,7 +173,7 @@ function matchesBlockedPattern(
 /**
  * Check if a real path is under an allowed root
  */
-function findAllowedRoot(
+export function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
 ): AllowedRoot | null {

@@ -27,6 +27,10 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface HostConfig {
+  projectDir: string; // Absolute path to the project directory on the host
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
@@ -38,6 +42,8 @@ export interface RegisteredGroup {
   trigger: string;
   added_at: string;
   containerConfig?: ContainerConfig;
+  hostConfig?: HostConfig;
+  execution?: 'container' | 'host'; // Default: 'container'
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
