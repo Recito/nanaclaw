@@ -54,7 +54,11 @@ function initMemoryForAgent(
       fs.writeFileSync(contextPath, context);
     } else {
       // Remove stale context file
-      try { fs.unlinkSync(contextPath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(contextPath);
+      } catch {
+        /* ignore */
+      }
     }
   } catch (err) {
     logger.debug({ err, groupFolder }, 'Failed to initialize memory for agent');

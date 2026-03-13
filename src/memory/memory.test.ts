@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { applySchema } from './schema.js';
 import { computeContentHash } from './dedup.js';
-import { salienceScore, recencyDecay, reinforcementFactor } from './salience.js';
+import {
+  salienceScore,
+  recencyDecay,
+  reinforcementFactor,
+} from './salience.js';
 import {
   createItem,
   reinforceItem,
@@ -247,17 +251,37 @@ describe('archiveItem', () => {
 
 describe('listItems', () => {
   it('lists items for a group', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'profile', summary: 'A' });
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'B' });
-    createItem(db, { group_folder: 'g2', memory_type: 'profile', summary: 'C' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'profile',
+      summary: 'A',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'B',
+    });
+    createItem(db, {
+      group_folder: 'g2',
+      memory_type: 'profile',
+      summary: 'C',
+    });
 
     expect(listItems(db, 'g1')).toHaveLength(2);
     expect(listItems(db, 'g2')).toHaveLength(1);
   });
 
   it('filters by memory type', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'profile', summary: 'A' });
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'B' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'profile',
+      summary: 'A',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'B',
+    });
 
     const profiles = listItems(db, 'g1', { memoryType: 'profile' });
     expect(profiles).toHaveLength(1);
@@ -265,8 +289,18 @@ describe('listItems', () => {
   });
 
   it('filters by category', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'preference', summary: 'A', category: 'food' });
-    createItem(db, { group_folder: 'g1', memory_type: 'preference', summary: 'B', category: 'tech' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'preference',
+      summary: 'A',
+      category: 'food',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'preference',
+      summary: 'B',
+      category: 'tech',
+    });
 
     expect(listItems(db, 'g1', { category: 'food' })).toHaveLength(1);
   });
@@ -274,9 +308,21 @@ describe('listItems', () => {
 
 describe('searchByKeyword', () => {
   it('finds items by keyword', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'preference', summary: 'User prefers dark roast coffee in the morning' });
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'TypeScript is a typed superset of JavaScript' });
-    createItem(db, { group_folder: 'g1', memory_type: 'profile', summary: 'User works as a software engineer' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'preference',
+      summary: 'User prefers dark roast coffee in the morning',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'TypeScript is a typed superset of JavaScript',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'profile',
+      summary: 'User works as a software engineer',
+    });
 
     const results = searchByKeyword(db, 'g1', 'coffee');
     expect(results.length).toBeGreaterThanOrEqual(1);
@@ -285,14 +331,26 @@ describe('searchByKeyword', () => {
   });
 
   it('returns empty for no matches', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'The sky is blue' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'The sky is blue',
+    });
     const results = searchByKeyword(db, 'g1', 'xyznonexistent');
     expect(results).toHaveLength(0);
   });
 
   it('respects group isolation', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'Coffee is great' });
-    createItem(db, { group_folder: 'g2', memory_type: 'knowledge', summary: 'Coffee is terrible' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'Coffee is great',
+    });
+    createItem(db, {
+      group_folder: 'g2',
+      memory_type: 'knowledge',
+      summary: 'Coffee is terrible',
+    });
 
     const results = searchByKeyword(db, 'g1', 'coffee');
     expect(results).toHaveLength(1);
@@ -300,10 +358,20 @@ describe('searchByKeyword', () => {
   });
 
   it('filters by memory type', () => {
-    createItem(db, { group_folder: 'g1', memory_type: 'preference', summary: 'Likes coffee' });
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'Coffee has caffeine' });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'preference',
+      summary: 'Likes coffee',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'Coffee has caffeine',
+    });
 
-    const results = searchByKeyword(db, 'g1', 'coffee', { memoryType: 'preference' });
+    const results = searchByKeyword(db, 'g1', 'coffee', {
+      memoryType: 'preference',
+    });
     expect(results).toHaveLength(1);
     expect(results[0].item.memory_type).toBe('preference');
   });
@@ -311,8 +379,16 @@ describe('searchByKeyword', () => {
 
 describe('getTopSalient', () => {
   it('returns most salient items', () => {
-    const item1 = createItem(db, { group_folder: 'g1', memory_type: 'profile', summary: 'Name is Alice' });
-    createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'Sky is blue' });
+    const item1 = createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'profile',
+      summary: 'Name is Alice',
+    });
+    createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'Sky is blue',
+    });
 
     // Reinforce item1 to make it more salient
     reinforceItem(db, item1.id);
@@ -328,7 +404,11 @@ describe('getTopSalient', () => {
 
 describe('findByContentHash', () => {
   it('finds existing item by hash', () => {
-    const item = createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'Test fact' });
+    const item = createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'Test fact',
+    });
     const found = findByContentHash(db, 'g1', item.content_hash);
     expect(found).toBeDefined();
     expect(found!.id).toBe(item.id);
@@ -342,10 +422,16 @@ describe('findByContentHash', () => {
 describe('decayOldMemories', () => {
   it('archives old unused memories', () => {
     // Create an item with old timestamps
-    const item = createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'Old fact' });
+    const item = createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'Old fact',
+    });
 
     // Manually backdate the timestamps
-    const oldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(
+      Date.now() - 200 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     db.prepare(
       `UPDATE memory_items SET last_accessed_at = ?, access_count = 1 WHERE id = ?`,
     ).run(oldDate, item.id);
@@ -358,10 +444,16 @@ describe('decayOldMemories', () => {
   });
 
   it('does not archive frequently accessed items', () => {
-    const item = createItem(db, { group_folder: 'g1', memory_type: 'knowledge', summary: 'Popular fact' });
+    const item = createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'knowledge',
+      summary: 'Popular fact',
+    });
 
     // Backdate but give high access count
-    const oldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(
+      Date.now() - 200 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     db.prepare(
       `UPDATE memory_items SET last_accessed_at = ?, access_count = 10 WHERE id = ?`,
     ).run(oldDate, item.id);
@@ -378,7 +470,9 @@ describe('decayOldMemories', () => {
       is_global: true,
     });
 
-    const oldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(
+      Date.now() - 200 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     db.prepare(
       `UPDATE memory_items SET last_accessed_at = ?, access_count = 1 WHERE id = ?`,
     ).run(oldDate, item.id);

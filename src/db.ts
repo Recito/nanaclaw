@@ -128,9 +128,7 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN host_config TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN host_config TEXT`);
   } catch {
     /* column already exists */
   }

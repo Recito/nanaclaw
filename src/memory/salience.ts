@@ -16,11 +16,8 @@ const DECAY_CONSTANT = Math.LN2 / HALF_LIFE_DAYS;
  */
 export function recencyDecay(lastAccessedAt: string | Date): number {
   const lastAccessed =
-    lastAccessedAt instanceof Date
-      ? lastAccessedAt
-      : new Date(lastAccessedAt);
-  const daysAgo =
-    (Date.now() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24);
+    lastAccessedAt instanceof Date ? lastAccessedAt : new Date(lastAccessedAt);
+  const daysAgo = (Date.now() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24);
   if (daysAgo <= 0) return 1.0;
   return Math.exp(-DECAY_CONSTANT * daysAgo);
 }
@@ -47,8 +44,6 @@ export function salienceScore(
   lastAccessedAt: string | Date,
 ): number {
   return (
-    similarity *
-    reinforcementFactor(accessCount) *
-    recencyDecay(lastAccessedAt)
+    similarity * reinforcementFactor(accessCount) * recencyDecay(lastAccessedAt)
   );
 }

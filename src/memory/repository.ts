@@ -58,7 +58,9 @@ export function createItem(
       `SELECT * FROM memory_items
        WHERE content_hash = ? AND group_folder = ? AND status = 'active'`,
     )
-    .get(contentHash, input.group_folder) as Record<string, unknown> | undefined;
+    .get(contentHash, input.group_folder) as
+    | Record<string, unknown>
+    | undefined;
 
   if (existing) {
     return reinforceItem(db, existing.id as string);
@@ -94,10 +96,7 @@ export function createItem(
 /**
  * Reinforce an existing memory — bump access count and timestamps.
  */
-export function reinforceItem(
-  db: Database.Database,
-  id: string,
-): MemoryItem {
+export function reinforceItem(db: Database.Database, id: string): MemoryItem {
   const timestamp = now();
   db.prepare(
     `UPDATE memory_items
@@ -114,10 +113,7 @@ export function reinforceItem(
 /**
  * Mark a memory as accessed (bumps last_accessed_at and access_count).
  */
-export function touchItem(
-  db: Database.Database,
-  id: string,
-): void {
+export function touchItem(db: Database.Database, id: string): void {
   const timestamp = now();
   db.prepare(
     `UPDATE memory_items
@@ -135,9 +131,9 @@ export function getItemById(
   db: Database.Database,
   id: string,
 ): MemoryItem | undefined {
-  const row = db
-    .prepare(`SELECT * FROM memory_items WHERE id = ?`)
-    .get(id) as Record<string, unknown> | undefined;
+  const row = db.prepare(`SELECT * FROM memory_items WHERE id = ?`).get(id) as
+    | Record<string, unknown>
+    | undefined;
   return row ? rowToItem(row) : undefined;
 }
 
@@ -167,7 +163,11 @@ export function archiveItem(db: Database.Database, id: string): boolean {
 export function listItems(
   db: Database.Database,
   groupFolder: string,
-  opts?: { memoryType?: MemoryType; category?: string; includeArchived?: boolean },
+  opts?: {
+    memoryType?: MemoryType;
+    category?: string;
+    includeArchived?: boolean;
+  },
 ): MemoryItem[] {
   let sql = `SELECT * FROM memory_items WHERE group_folder = ?`;
   const params: unknown[] = [groupFolder];
@@ -234,9 +234,7 @@ export function searchByKeyword(
     const item = rowToItem(row);
     // Normalize: most relevant (most negative rank) → 1.0
     const similarity =
-      rows.length === 1
-        ? 1.0
-        : 1.0 - (row.rank - minRank) / rankRange;
+      rows.length === 1 ? 1.0 : 1.0 - (row.rank - minRank) / rankRange;
     const salience = salienceScore(
       similarity,
       item.access_count,
@@ -302,10 +300,7 @@ export function findByContentHash(
 /**
  * Count active memories for a group.
  */
-export function countItems(
-  db: Database.Database,
-  groupFolder: string,
-): number {
+export function countItems(db: Database.Database, groupFolder: string): number {
   const row = db
     .prepare(
       `SELECT COUNT(*) as count FROM memory_items

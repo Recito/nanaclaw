@@ -13,7 +13,11 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  HookCallback,
+  PreCompactHookInput,
+} from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -73,21 +77,28 @@ function checkDeepWorkContinuation(): string | null {
   if (!fs.existsSync(stateFile)) return null;
 
   try {
-    const state: DeepWorkState = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    const state: DeepWorkState = JSON.parse(
+      fs.readFileSync(stateFile, 'utf-8'),
+    );
     const now = Math.floor(Date.now() / 1000);
     const remaining = state.deadline_unix - now;
 
     if (remaining <= 0) {
-      log(`Deep work deadline passed (${state.deadline_human}), not continuing`);
+      log(
+        `Deep work deadline passed (${state.deadline_human}), not continuing`,
+      );
       return null;
     }
 
     const remainingMin = Math.round(remaining / 60);
-    log(`Deep work active: ${remainingMin} min remaining until ${state.deadline_human}`);
+    log(
+      `Deep work active: ${remainingMin} min remaining until ${state.deadline_human}`,
+    );
 
-    const completedStr = state.completed.length > 0
-      ? `\nCompleted so far: ${state.completed.join(', ')}`
-      : '';
+    const completedStr =
+      state.completed.length > 0
+        ? `\nCompleted so far: ${state.completed.join(', ')}`
+        : '';
     const currentStr = state.current
       ? `\nWas working on: ${state.current}`
       : '';
@@ -104,7 +115,9 @@ function checkDeepWorkContinuation(): string | null {
       `Run \`date\` to verify current time, then continue working. Do NOT re-announce the plan or re-read the full codebase — pick up where you left off.`,
     ].join('\n');
   } catch (err) {
-    log(`Failed to read deep_work.json: ${err instanceof Error ? err.message : String(err)}`);
+    log(
+      `Failed to read deep_work.json: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
 }
@@ -148,7 +161,9 @@ class MessageStream {
         yield this.queue.shift()!;
       }
       if (this.done) return;
-      await new Promise<void>(r => { this.waiting = r; });
+      await new Promise<void>((r) => {
+        this.waiting = r;
+      });
       this.waiting = null;
     }
   }
@@ -158,7 +173,9 @@ async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
@@ -166,7 +183,11 @@ async function readStdin(): Promise<string> {
 
 function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {
+      /* ignore */
+    }
     return true;
   }
   return false;
@@ -175,8 +196,9 @@ function shouldClose(): boolean {
 function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(IPC_INPUT_DIR)
+      .filter((f) => f.endsWith('.json'))
       .sort();
 
     const messages: string[] = [];
@@ -189,8 +211,14 @@ function drainIpcInput(): string[] {
           messages.push(data.text);
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(
+          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
       }
     }
     return messages;
@@ -229,17 +257,24 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
+function getSessionSummary(
+  sessionId: string,
+  transcriptPath: string,
+): string | null {
   const projectDir = path.dirname(transcriptPath);
   const indexPath = path.join(projectDir, 'sessions-index.json');
 
   if (!fs.existsSync(indexPath)) return null;
 
   try {
-    const index: SessionsIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const entry = index.entries.find(e => e.sessionId === sessionId);
+    const index: SessionsIndex = JSON.parse(
+      fs.readFileSync(indexPath, 'utf-8'),
+    );
+    const entry = index.entries.find((e) => e.sessionId === sessionId);
     if (entry?.summary) return entry.summary;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return null;
 }
@@ -267,11 +302,17 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const filename = `${date}-${name}.md`;
       const filePath = path.join(conversationsDir, filename);
 
-      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
+      const markdown = formatTranscriptMarkdown(
+        messages,
+        summary,
+        assistantName,
+      );
       fs.writeFileSync(filePath, markdown);
       log(`Archived conversation to ${filePath}`);
     } catch (err) {
-      log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
+      log(
+        `Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     return {};
@@ -279,7 +320,11 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 }
 
 function sanitizeFilename(summary: string): string {
-  return summary.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
+  return summary
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
 }
 
 function generateFallbackName(): string {
@@ -287,7 +332,10 @@ function generateFallbackName(): string {
   return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
 }
 
-interface ParsedMessage { role: 'user' | 'assistant'; content: string; }
+interface ParsedMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 function parseTranscript(content: string): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
@@ -296,9 +344,12 @@ function parseTranscript(content: string): ParsedMessage[] {
     try {
       const entry = JSON.parse(line);
       if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string'
-          ? entry.message.content
-          : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
+        const text =
+          typeof entry.message.content === 'string'
+            ? entry.message.content
+            : entry.message.content
+                .map((c: { text?: string }) => c.text || '')
+                .join('');
         if (text) messages.push({ role: 'user', content: text });
       } else if (entry.type === 'assistant' && entry.message?.content) {
         const textParts = entry.message.content
@@ -307,22 +358,43 @@ function parseTranscript(content: string): ParsedMessage[] {
         const text = textParts.join('');
         if (text) messages.push({ role: 'assistant', content: text });
       }
-    } catch { /* ignore parse errors */ }
+    } catch {
+      /* ignore parse errors */
+    }
   }
   return messages;
 }
 
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null, assistantName?: string): string {
+function formatTranscriptMarkdown(
+  messages: ParsedMessage[],
+  title?: string | null,
+  assistantName?: string,
+): string {
   const now = new Date();
-  const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
-  });
+  const formatDateTime = (d: Date) =>
+    d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
 
   const lines: string[] = [];
-  lines.push(`# ${title || 'Conversation'}`, '', `Archived: ${formatDateTime(now)}`, '', '---', '');
+  lines.push(
+    `# ${title || 'Conversation'}`,
+    '',
+    `Archived: ${formatDateTime(now)}`,
+    '',
+    '---',
+    '',
+  );
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : (assistantName || 'Assistant');
-    const content = msg.content.length > 2000 ? msg.content.slice(0, 2000) + '...' : msg.content;
+    const sender = msg.role === 'user' ? 'User' : assistantName || 'Assistant';
+    const content =
+      msg.content.length > 2000
+        ? msg.content.slice(0, 2000) + '...'
+        : msg.content;
     lines.push(`**${sender}**: ${content}`, '');
   }
   return lines.join('\n');
@@ -335,7 +407,11 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{
+  newSessionId?: string;
+  lastAssistantUuid?: string;
+  closedDuringQuery: boolean;
+}> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -366,8 +442,15 @@ async function runQuery(
 
   // Load global CLAUDE.md
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && GLOBAL_DIR && fs.existsSync(path.join(GLOBAL_DIR, 'CLAUDE.md'))) {
-    globalClaudeMd = fs.readFileSync(path.join(GLOBAL_DIR, 'CLAUDE.md'), 'utf-8');
+  if (
+    !containerInput.isMain &&
+    GLOBAL_DIR &&
+    fs.existsSync(path.join(GLOBAL_DIR, 'CLAUDE.md'))
+  ) {
+    globalClaudeMd = fs.readFileSync(
+      path.join(GLOBAL_DIR, 'CLAUDE.md'),
+      'utf-8',
+    );
   }
 
   // Append memory context if available
@@ -396,21 +479,37 @@ async function runQuery(
     options: {
       cwd: PROJECT_DIR,
       pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || undefined,
-      additionalDirectories: additionalDirs.length > 0 ? additionalDirs : undefined,
+      additionalDirectories:
+        additionalDirs.length > 0 ? additionalDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+        ? {
+            type: 'preset' as const,
+            preset: 'claude_code' as const,
+            append: globalClaudeMd,
+          }
         : undefined,
       allowedTools: [
         'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
+        'Read',
+        'Write',
+        'Edit',
+        'Glob',
+        'Grep',
+        'WebSearch',
+        'WebFetch',
+        'Task',
+        'TaskOutput',
+        'TaskStop',
+        'TeamCreate',
+        'TeamDelete',
+        'SendMessage',
+        'TodoWrite',
+        'ToolSearch',
+        'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -425,17 +524,25 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             NANOCLAW_IPC_BASE_DIR: path.dirname(IPC_INPUT_DIR),
-            NANOCLAW_MEMORY_DB: process.env.NANOCLAW_MEMORY_DB || path.join(WORK_DIR, 'memory.db'),
+            NANOCLAW_WORK_DIR: WORK_DIR,
+            NANOCLAW_MEMORY_DB:
+              process.env.NANOCLAW_MEMORY_DB ||
+              path.join(WORK_DIR, 'memory.db'),
           },
         },
       },
       hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+        PreCompact: [
+          { hooks: [createPreCompactHook(containerInput.assistantName)] },
+        ],
       },
-    }
+    },
   })) {
     messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+    const msgType =
+      message.type === 'system'
+        ? `system/${(message as { subtype?: string }).subtype}`
+        : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
     if (message.type === 'assistant' && 'uuid' in message) {
@@ -449,12 +556,15 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const textResult =
+        'result' in message ? (message as { result?: string }).result : null;
+      log(
+        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
+      );
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
       });
     }
   }
@@ -476,12 +586,14 @@ async function main(): Promise<void> {
   try {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
-    log(`Received input for group: ${containerInput.groupFolder} (host mode, project: ${PROJECT_DIR})`);
+    log(
+      `Received input for group: ${containerInput.groupFolder} (host mode, project: ${PROJECT_DIR})`,
+    );
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
     });
     process.exit(1);
   }
@@ -492,7 +604,13 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   // __dirname is the nanoclaw dist/ dir; container agent-runner is relative to the project root
   const nanoclawRoot = path.dirname(__dirname);
-  const containerMcp = path.join(nanoclawRoot, 'container', 'agent-runner', 'dist', 'ipc-mcp-stdio.js');
+  const containerMcp = path.join(
+    nanoclawRoot,
+    'container',
+    'agent-runner',
+    'dist',
+    'ipc-mcp-stdio.js',
+  );
   let mcpServerPath = '';
   if (fs.existsSync(containerMcp)) {
     mcpServerPath = containerMcp;
@@ -502,7 +620,11 @@ async function main(): Promise<void> {
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
 
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
@@ -517,10 +639,20 @@ async function main(): Promise<void> {
   let resumeAt: string | undefined;
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      log(
+        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
+      );
+      const queryResult = await runQuery(
+        prompt,
+        sessionId,
+        mcpServerPath,
+        containerInput,
+        sdkEnv,
+        resumeAt,
+      );
       if (queryResult.newSessionId) sessionId = queryResult.newSessionId;
-      if (queryResult.lastAssistantUuid) resumeAt = queryResult.lastAssistantUuid;
+      if (queryResult.lastAssistantUuid)
+        resumeAt = queryResult.lastAssistantUuid;
 
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
@@ -533,7 +665,7 @@ async function main(): Promise<void> {
       const deepWorkPrompt = checkDeepWorkContinuation();
       if (deepWorkPrompt) {
         log(`Deep work auto-continuing in ${DEEP_WORK_CONTINUE_DELAY_MS}ms...`);
-        await new Promise(r => setTimeout(r, DEEP_WORK_CONTINUE_DELAY_MS));
+        await new Promise((r) => setTimeout(r, DEEP_WORK_CONTINUE_DELAY_MS));
 
         // Re-check in case user sent a message or close sentinel during the delay
         const urgentMessages = drainIpcInput();
@@ -542,7 +674,9 @@ async function main(): Promise<void> {
           break;
         }
         if (urgentMessages.length > 0) {
-          log(`Got ${urgentMessages.length} IPC messages during delay, using those instead`);
+          log(
+            `Got ${urgentMessages.length} IPC messages during delay, using those instead`,
+          );
           prompt = urgentMessages.join('\n');
         } else {
           prompt = deepWorkPrompt;
@@ -568,7 +702,7 @@ async function main(): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      error: errorMessage
+      error: errorMessage,
     });
     process.exit(1);
   }

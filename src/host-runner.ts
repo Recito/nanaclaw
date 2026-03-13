@@ -15,10 +15,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
-import {
-  ContainerInput,
-  ContainerOutput,
-} from './container-runner.js';
+import { ContainerInput, ContainerOutput } from './container-runner.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { findAllowedRoot, loadMountAllowlist } from './mount-security.js';
@@ -34,7 +31,10 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
  */
 function resolveClaudeCodePath(): string | null {
   // Explicit env var takes priority
-  if (process.env.CLAUDE_CODE_PATH && fs.existsSync(process.env.CLAUDE_CODE_PATH)) {
+  if (
+    process.env.CLAUDE_CODE_PATH &&
+    fs.existsSync(process.env.CLAUDE_CODE_PATH)
+  ) {
     return process.env.CLAUDE_CODE_PATH;
   }
   // Check common locations
@@ -51,10 +51,19 @@ function resolveClaudeCodePath(): string | null {
   if (fs.existsSync(npxCache)) {
     try {
       for (const entry of fs.readdirSync(npxCache)) {
-        const cliPath = path.join(npxCache, entry, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+        const cliPath = path.join(
+          npxCache,
+          entry,
+          'node_modules',
+          '@anthropic-ai',
+          'claude-code',
+          'cli.js',
+        );
         if (fs.existsSync(cliPath)) return cliPath;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return null;
 }
@@ -132,14 +141,23 @@ export async function runHostAgent(
     if (context) {
       fs.writeFileSync(contextPath, context);
     } else {
-      try { fs.unlinkSync(contextPath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(contextPath);
+      } catch {
+        /* ignore */
+      }
     }
   } catch (err) {
     logger.debug({ err }, 'Failed to initialize memory for host agent');
   }
 
   // Set up per-group sessions directory (same as container runner)
-  const groupSessionsDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+  const groupSessionsDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude',
+  );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
 
   // Sync skills
@@ -166,7 +184,7 @@ export async function runHostAgent(
   // Build environment for the host agent runner
   const authMode = detectAuthMode();
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...(process.env as Record<string, string>),
     // Path configuration (host agent runner reads these)
     NANOCLAW_IPC_DIR: path.join(groupIpcDir, 'input'),
     NANOCLAW_WORK_DIR: groupDir,
@@ -195,7 +213,11 @@ export async function runHostAgent(
   }
 
   // Resolve the host agent runner script
-  const agentRunnerScript = path.join(process.cwd(), 'dist', 'host-agent-runner.js');
+  const agentRunnerScript = path.join(
+    process.cwd(),
+    'dist',
+    'host-agent-runner.js',
+  );
   if (!fs.existsSync(agentRunnerScript)) {
     return {
       status: 'error',
@@ -256,7 +278,10 @@ export async function runHostAgent(
       // Force kill after 15s if still alive
       setTimeout(() => {
         if (!proc.killed) {
-          logger.warn({ group: group.name, processName }, 'Force killing host agent');
+          logger.warn(
+            { group: group.name, processName },
+            'Force killing host agent',
+          );
           proc.kill('SIGKILL');
         }
       }, 15000);
@@ -372,7 +397,14 @@ export async function runHostAgent(
       ];
 
       if (isVerbose || code !== 0) {
-        logLines.push('', `=== Stderr ===`, stderr, '', `=== Stdout ===`, stdout);
+        logLines.push(
+          '',
+          `=== Stderr ===`,
+          stderr,
+          '',
+          `=== Stdout ===`,
+          stdout,
+        );
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));
@@ -418,8 +450,15 @@ export async function runHostAgent(
         logger.info({ group: group.name, duration }, 'Host agent completed');
         resolve(output);
       } catch (err) {
-        logger.error({ group: group.name, stdout, stderr, error: err }, 'Failed to parse host agent output');
-        resolve({ status: 'error', result: null, error: 'Failed to parse output' });
+        logger.error(
+          { group: group.name, stdout, stderr, error: err },
+          'Failed to parse host agent output',
+        );
+        resolve({
+          status: 'error',
+          result: null,
+          error: 'Failed to parse output',
+        });
       }
     });
   });

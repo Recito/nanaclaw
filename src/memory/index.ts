@@ -1,7 +1,11 @@
 export { applySchema } from './schema.js';
 export { buildMemoryContext } from './context-builder.js';
 export { computeContentHash } from './dedup.js';
-export { salienceScore, recencyDecay, reinforcementFactor } from './salience.js';
+export {
+  salienceScore,
+  recencyDecay,
+  reinforcementFactor,
+} from './salience.js';
 export { getMemoryDb, openMemoryDb, closeAllMemoryDbs } from './db.js';
 export {
   createItem,

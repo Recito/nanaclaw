@@ -17,14 +17,80 @@ const MAX_ITEMS = 10;
 /** Simple keyword extraction: split on whitespace, remove stopwords and short words. */
 function extractKeywords(text: string): string[] {
   const stopwords = new Set([
-    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-    'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
-    'on', 'with', 'at', 'by', 'from', 'as', 'into', 'about', 'that',
-    'this', 'it', 'its', 'and', 'or', 'but', 'not', 'no', 'if', 'then',
-    'so', 'up', 'out', 'just', 'also', 'very', 'what', 'how', 'when',
-    'where', 'who', 'which', 'why', 'my', 'your', 'me', 'you', 'i',
-    'we', 'they', 'he', 'she', 'him', 'her', 'them', 'our', 'their',
+    'a',
+    'an',
+    'the',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'being',
+    'have',
+    'has',
+    'had',
+    'do',
+    'does',
+    'did',
+    'will',
+    'would',
+    'could',
+    'should',
+    'may',
+    'might',
+    'can',
+    'shall',
+    'to',
+    'of',
+    'in',
+    'for',
+    'on',
+    'with',
+    'at',
+    'by',
+    'from',
+    'as',
+    'into',
+    'about',
+    'that',
+    'this',
+    'it',
+    'its',
+    'and',
+    'or',
+    'but',
+    'not',
+    'no',
+    'if',
+    'then',
+    'so',
+    'up',
+    'out',
+    'just',
+    'also',
+    'very',
+    'what',
+    'how',
+    'when',
+    'where',
+    'who',
+    'which',
+    'why',
+    'my',
+    'your',
+    'me',
+    'you',
+    'i',
+    'we',
+    'they',
+    'he',
+    'she',
+    'him',
+    'her',
+    'them',
+    'our',
+    'their',
   ]);
 
   return text
@@ -46,9 +112,9 @@ function formatMemoryItem(r: MemorySearchResult): string {
  */
 function readLegacyMemoryFiles(memoryDir: string): string[] {
   const entries: string[] = [];
-  const files = fs.readdirSync(memoryDir).filter(
-    (f) => f.endsWith('.md') && f !== 'index.md',
-  );
+  const files = fs
+    .readdirSync(memoryDir)
+    .filter((f) => f.endsWith('.md') && f !== 'index.md');
   for (const file of files) {
     try {
       const content = fs.readFileSync(path.join(memoryDir, file), 'utf-8');
@@ -86,7 +152,9 @@ export function buildMemoryContext(
       // Try FTS5 with OR-joined keywords
       const ftsQuery = keywords.slice(0, 5).join(' OR ');
       try {
-        const ftsResults = searchByKeyword(db, groupFolder, ftsQuery, { limit: MAX_ITEMS });
+        const ftsResults = searchByKeyword(db, groupFolder, ftsQuery, {
+          limit: MAX_ITEMS,
+        });
         for (const r of ftsResults) {
           if (!seenIds.has(r.item.id)) {
             seenIds.add(r.item.id);

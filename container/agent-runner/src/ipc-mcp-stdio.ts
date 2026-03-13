@@ -21,6 +21,11 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 
+// Working directory (for deep_work.json etc.)
+const WORK_DIR = process.env.NANOCLAW_WORK_DIR || '/workspace/group';
+const DEEP_WORK_PATH = path.join(WORK_DIR, 'deep_work.json');
+const DEEP_WORK_MEMORY_CATEGORY = 'deep-work';
+
 // Memory database (per-group, mounted at /workspace/group/memory.db or via env)
 const MEMORY_DB_PATH = process.env.NANOCLAW_MEMORY_DB || '/workspace/group/memory.db';
 const MEMORY_TYPES = ['profile', 'event', 'knowledge', 'behavior', 'preference', 'skill'] as const;
@@ -629,6 +634,284 @@ server.tool(
     } finally {
       db.close();
     }
+  },
+);
+
+// --- Deep Work Tools ---
+
+interface DeepWorkState {
+  deadline_unix: number;
+  deadline_human: string;
+  goal: string;
+  plan: string[];
+  completed: string[];
+  current: string | null;
+  started_at: string;
+}
+
+function writeDeepWorkFile(state: DeepWorkState): void {
+  fs.mkdirSync(path.dirname(DEEP_WORK_PATH), { recursive: true });
+  const tempPath = `${DEEP_WORK_PATH}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(state, null, 2));
+  fs.renameSync(tempPath, DEEP_WORK_PATH);
+}
+
+function readDeepWorkFile(): DeepWorkState | null {
+  try {
+    if (!fs.existsSync(DEEP_WORK_PATH)) return null;
+    return JSON.parse(fs.readFileSync(DEEP_WORK_PATH, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Store or update the deep-work memory entry. */
+function upsertDeepWorkMemory(db: Database.Database, summary: string): void {
+  const now = new Date().toISOString();
+  const contentHash = memoryContentHash(summary, 'event');
+
+  // Delete any existing deep-work memory (by category)
+  db.prepare(
+    `DELETE FROM memory_items WHERE group_folder = ? AND category = ? AND status = 'active'`
+  ).run(groupFolder, DEEP_WORK_MEMORY_CATEGORY);
+
+  const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    `INSERT INTO memory_items (id, group_folder, memory_type, summary, content_hash, access_count, last_accessed_at, last_reinforced_at, created_at, updated_at, category, is_global, status, extra)
+     VALUES (?, ?, 'event', ?, ?, 1, ?, ?, ?, ?, ?, 0, 'active', NULL)`
+  ).run(id, groupFolder, summary, contentHash, now, now, now, now, DEEP_WORK_MEMORY_CATEGORY);
+}
+
+function buildDeepWorkSummary(state: DeepWorkState): string {
+  const parts = [
+    `Deep work session active until ${state.deadline_human}.`,
+    `Goal: ${state.goal}.`,
+    `Plan: ${state.plan.join(', ')}.`,
+  ];
+  if (state.completed.length > 0) {
+    parts.push(`Completed: ${state.completed.join(', ')}.`);
+  }
+  if (state.current) {
+    parts.push(`Currently working on: ${state.current}.`);
+  }
+  return parts.join(' ');
+}
+
+server.tool(
+  'start_deep_work',
+  `Start a time-bounded deep work session. Creates persistent state that survives context compaction and enables auto-continuation.
+
+You MUST call this when the user gives you a time budget or deadline (e.g., "work for 2 hours", "until 7am"). Provide either deadline_minutes OR deadline_time, not both.`,
+  {
+    goal: z.string().describe('One-line summary of what to accomplish'),
+    deadline_minutes: z.number().optional().describe('Duration in minutes from now'),
+    deadline_time: z.string().optional().describe('Absolute local time (e.g., "2026-03-13T16:00:00"). No Z suffix.'),
+    plan: z.array(z.string()).describe('Ordered list of sub-tasks'),
+  },
+  async (args) => {
+    // Validate deadline params
+    if (!args.deadline_minutes && !args.deadline_time) {
+      return { content: [{ type: 'text' as const, text: 'Provide either deadline_minutes or deadline_time.' }], isError: true };
+    }
+    if (args.deadline_minutes && args.deadline_time) {
+      return { content: [{ type: 'text' as const, text: 'Provide only one of deadline_minutes or deadline_time, not both.' }], isError: true };
+    }
+
+    let deadlineUnix: number;
+    let deadlineHuman: string;
+    const nowUnix = Math.floor(Date.now() / 1000);
+
+    if (args.deadline_minutes) {
+      if (args.deadline_minutes <= 0) {
+        return { content: [{ type: 'text' as const, text: 'deadline_minutes must be positive.' }], isError: true };
+      }
+      deadlineUnix = nowUnix + args.deadline_minutes * 60;
+      const deadlineDate = new Date(deadlineUnix * 1000);
+      deadlineHuman = deadlineDate.toLocaleString();
+    } else {
+      // Parse absolute local time
+      if (/[Zz]$/.test(args.deadline_time!) || /[+-]\d{2}:\d{2}$/.test(args.deadline_time!)) {
+        return { content: [{ type: 'text' as const, text: 'deadline_time must be local time without timezone suffix.' }], isError: true };
+      }
+      const parsed = new Date(args.deadline_time!);
+      if (isNaN(parsed.getTime())) {
+        return { content: [{ type: 'text' as const, text: `Invalid deadline_time: "${args.deadline_time}"` }], isError: true };
+      }
+      deadlineUnix = Math.floor(parsed.getTime() / 1000);
+      if (deadlineUnix <= nowUnix) {
+        return { content: [{ type: 'text' as const, text: 'Deadline is in the past. Use a future time.' }], isError: true };
+      }
+      deadlineHuman = parsed.toLocaleString();
+    }
+
+    const state: DeepWorkState = {
+      deadline_unix: deadlineUnix,
+      deadline_human: deadlineHuman,
+      goal: args.goal,
+      plan: args.plan,
+      completed: [],
+      current: null,
+      started_at: new Date().toISOString(),
+    };
+
+    writeDeepWorkFile(state);
+
+    // Store memory entry
+    const db = getMemoryDb();
+    if (db) {
+      try {
+        upsertDeepWorkMemory(db, buildDeepWorkSummary(state));
+      } finally {
+        db.close();
+      }
+    }
+
+    const remainingMin = Math.round((deadlineUnix - nowUnix) / 60);
+    return {
+      content: [{ type: 'text' as const, text: `Deep work started. Deadline: ${deadlineHuman} (~${remainingMin} min). Plan: ${args.plan.join(' → ')}` }],
+    };
+  },
+);
+
+server.tool(
+  'update_deep_work',
+  `Update progress on the current deep work session. Call after completing each sub-task to keep state current.`,
+  {
+    completed_task: z.string().optional().describe('Task just completed (moves from plan to completed)'),
+    current_task: z.string().nullable().optional().describe('Task now working on'),
+    add_tasks: z.array(z.string()).optional().describe('New tasks to append to plan'),
+    remove_tasks: z.array(z.string()).optional().describe('Tasks to remove from plan'),
+  },
+  async (args) => {
+    const state = readDeepWorkFile();
+    if (!state) {
+      return { content: [{ type: 'text' as const, text: 'No active deep work session. Call start_deep_work first.' }], isError: true };
+    }
+
+    // Build new state immutably
+    const newState: DeepWorkState = {
+      ...state,
+      plan: [...state.plan],
+      completed: [...state.completed],
+    };
+
+    if (args.completed_task) {
+      newState.completed.push(args.completed_task);
+      newState.plan = newState.plan.filter(t => t !== args.completed_task);
+    }
+    if (args.current_task !== undefined) {
+      newState.current = args.current_task;
+    }
+    if (args.add_tasks) {
+      newState.plan.push(...args.add_tasks);
+    }
+    if (args.remove_tasks) {
+      const removeSet = new Set(args.remove_tasks);
+      newState.plan = newState.plan.filter(t => !removeSet.has(t));
+    }
+
+    writeDeepWorkFile(newState);
+
+    // Update memory
+    const db = getMemoryDb();
+    if (db) {
+      try {
+        upsertDeepWorkMemory(db, buildDeepWorkSummary(newState));
+      } finally {
+        db.close();
+      }
+    }
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const remainingMin = Math.round((newState.deadline_unix - nowUnix) / 60);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Progress updated. ~${remainingMin} min remaining. Completed: ${newState.completed.length}/${newState.completed.length + newState.plan.length} tasks.${newState.current ? ` Current: ${newState.current}` : ''}`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  'end_deep_work',
+  `End the current deep work session. Cleans up state file and memory. Call when deadline is reached or work is complete.`,
+  {
+    summary: z.string().optional().describe('Optional completion summary to store as a knowledge memory'),
+  },
+  async (args) => {
+    const state = readDeepWorkFile();
+    if (!state) {
+      return { content: [{ type: 'text' as const, text: 'No active deep work session.' }] };
+    }
+
+    // Build completion report
+    const durationMin = Math.round((Math.floor(Date.now() / 1000) - Math.floor(new Date(state.started_at).getTime() / 1000)) / 60);
+    const report = [
+      `Deep work session ended.`,
+      `Duration: ${durationMin} minutes.`,
+      `Goal: ${state.goal}`,
+      `Completed: ${state.completed.length} tasks${state.completed.length > 0 ? ` (${state.completed.join(', ')})` : ''}.`,
+      `Remaining: ${state.plan.length} tasks${state.plan.length > 0 ? ` (${state.plan.join(', ')})` : ''}.`,
+    ].join('\n');
+
+    // Delete state file
+    try { fs.unlinkSync(DEEP_WORK_PATH); } catch { /* already gone */ }
+
+    // Clean up memory
+    const db = getMemoryDb();
+    if (db) {
+      try {
+        db.prepare(
+          `DELETE FROM memory_items WHERE group_folder = ? AND category = ? AND status = 'active'`
+        ).run(groupFolder, DEEP_WORK_MEMORY_CATEGORY);
+
+        // Optionally store completion summary as knowledge
+        if (args.summary) {
+          const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const now = new Date().toISOString();
+          const hash = memoryContentHash(args.summary, 'knowledge');
+          db.prepare(
+            `INSERT INTO memory_items (id, group_folder, memory_type, summary, content_hash, access_count, last_accessed_at, last_reinforced_at, created_at, updated_at, category, is_global, status, extra)
+             VALUES (?, ?, 'knowledge', ?, ?, 1, ?, ?, ?, ?, NULL, 0, 'active', NULL)`
+          ).run(id, groupFolder, args.summary, hash, now, now, now, now);
+        }
+      } finally {
+        db.close();
+      }
+    }
+
+    return { content: [{ type: 'text' as const, text: report }] };
+  },
+);
+
+server.tool(
+  'get_deep_work_status',
+  `Check the current deep work session status. Returns deadline, progress, and time remaining. Use after context compaction to re-orient.`,
+  {},
+  async () => {
+    const state = readDeepWorkFile();
+    if (!state) {
+      return { content: [{ type: 'text' as const, text: 'No active deep work session.' }] };
+    }
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const remaining = state.deadline_unix - nowUnix;
+    const remainingMin = Math.round(remaining / 60);
+    const expired = remaining <= 0;
+
+    const status = [
+      `Deep work session ${expired ? 'EXPIRED' : 'ACTIVE'}`,
+      `Deadline: ${state.deadline_human}${expired ? ' (PAST)' : ` (~${remainingMin} min remaining)`}`,
+      `Goal: ${state.goal}`,
+      `Plan: ${state.plan.join(' → ') || '(none remaining)'}`,
+      `Completed: ${state.completed.join(', ') || '(none yet)'}`,
+      state.current ? `Currently working on: ${state.current}` : '',
+      `Started: ${state.started_at}`,
+    ].filter(Boolean).join('\n');
+
+    return { content: [{ type: 'text' as const, text: status }] };
   },
 );
 
