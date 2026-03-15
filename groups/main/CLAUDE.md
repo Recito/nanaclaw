@@ -54,39 +54,35 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Memory
 
-You have structured memory in `memory/`. Check it proactively.
+You have structured memory stored in a database. Relevant memories are automatically loaded into your context — check the "Relevant Memories" section if present.
 
-### When to READ memory
+### Memory Tools
+
+- `mcp__nanoclaw__remember` — Store a memory (`summary`, `memory_type`, optional `category`)
+- `mcp__nanoclaw__recall` — Search memories (`query`, optional `memory_type`, `limit`)
+- `mcp__nanoclaw__forget` — Remove a memory (`query_or_id`)
+- `mcp__nanoclaw__list_memories` — Browse all (optional `memory_type`, `category`)
+
+Memory types: `profile`, `event`, `knowledge`, `behavior`, `preference`, `skill`
+
+### When to READ (use `recall`)
 - Before answering personal questions (names, preferences, history)
 - When someone references past context ("like last time", "the usual")
 - At the start of tasks involving people or preferences
-- Read `memory/index.md` first to find the right file
 - After reading memory, include 🤔 at the start of your response so the user knows you checked
 
-### When to WRITE memory
+### When to WRITE (use `remember`)
 - User shares personal info (name, birthday, preferences, contacts)
-- User corrects you — update the relevant memory file immediately
+- User corrects you — store the correction immediately
 - You learn something important about a person, project, or recurring topic
 - User explicitly says "remember this"
 - After writing memory, include ✍️ at the start of your response so the user knows you saved something
 
-### File structure
-- `memory/index.md` — what each file contains, when last updated
-- `memory/people.md` — names, relationships, details about people
-- `memory/preferences.md` — likes, dislikes, habits, communication style
-- `memory/facts.md` — projects, accounts, addresses, recurring topics
-- Create new files as needed (e.g., `memory/projects.md`). Update index.md when you do.
-
 ### Rules
-- Append to existing files; never overwrite unless correcting outdated info
-- Keep entries concise: one fact per line or short paragraph
-- Split files over 300 lines into sub-files (e.g., `memory/people/alice.md`)
-- Use `/memory` skill for bulk operations (review, search, reorganize, forget)
+- One fact per `remember` call — keep entries concise and atomic
+- Duplicate detection is automatic — safe to re-store existing facts
+- Use `/memory` skill for bulk operations (review, reorganize, migrate)
 - `conversations/` has past session transcripts — grep for detailed recall
-
-### Global memory
-- You have READ and WRITE access to global memory at `/workspace/project/groups/global/memory/`
-- Write to global memory when the user says "remember this globally" or the fact applies across all groups
 
 ## WhatsApp Formatting (and other messaging apps)
 

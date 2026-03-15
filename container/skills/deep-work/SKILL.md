@@ -1,3 +1,8 @@
+---
+name: deep-work
+description: "MUST USE when user gives a time budget or deadline (e.g. '2 hours', 'until 7am', '给你两个小时', '做到明天'). Calls start_deep_work to persist state, enables auto-continuation across context compaction. Without this skill, timed sessions will end early."
+---
+
 # Deep Work — Time-Bounded Autonomous Execution
 
 When the user gives you a time budget or deadline, enter deep work mode. You will work continuously and autonomously until time runs out.
@@ -44,12 +49,18 @@ Send via `send_message`:
 
 ## Step 2: Plan the Work
 
-Before diving in, spend 2-3 minutes creating a prioritized task list:
+Before diving in, spend 2-3 minutes reviewing prior context and planning:
 
-1. Read and understand the codebase/context relevant to the request
-2. Break the goal into concrete, ordered sub-tasks
-3. Rank by impact — highest value work first
-4. Estimate rough time per sub-task
+1. **Recall prior work** — search for relevant memories from previous sessions:
+   ```
+   mcp__nanoclaw__recall(query: "<goal keywords>", memory_type: "knowledge", limit: 10)
+   mcp__nanoclaw__recall(query: "deep-work", memory_type: "knowledge", limit: 5)
+   ```
+   Previous deep-work sessions on the same topic will have saved detailed context: files modified, approaches tried, gotchas discovered. Use this to avoid redoing work or repeating mistakes.
+2. Read and understand the codebase/context relevant to the request
+3. Break the goal into concrete, ordered sub-tasks
+4. Rank by impact — highest value work first
+5. Estimate rough time per sub-task
 
 If your plan differs from what you passed to `start_deep_work`, update it:
 ```
@@ -64,15 +75,24 @@ Send a brief plan to the user via `send_message`:
 For each sub-task:
 
 1. **Do the work** — implement, test, verify
-2. **Check the clock** — run `date '+%s'` after completing each sub-task
-3. **Update progress:**
+2. **Save working context to memory** — after each sub-task, call `remember` with what you learned and did:
+   ```
+   mcp__nanoclaw__remember(
+     summary: "deep-work: Fixed race condition in order router by adding mutex on position map. Modified src/router.ts lines 45-80. Key finding: concurrent fills from different exchanges were corrupting state.",
+     memory_type: "knowledge",
+     category: "deep-work/context"
+   )
+   ```
+   Include: files modified, approach taken, key findings, gotchas discovered. This is your lifeline after context compaction.
+3. **Check the clock** — run `date '+%s'` after completing each sub-task
+4. **Update progress:**
    ```
    mcp__nanoclaw__update_deep_work(
      completed_task: "Fix X",
      current_task: "Optimize Y"
    )
    ```
-4. **Decide next action:**
+5. **Decide next action:**
    - **Time remaining > estimated next task**: Continue to next sub-task
    - **Time remaining < 10 minutes**: Go to Step 4 (wrap up)
    - **Time remaining > 10 min but < next task estimate**: Pick a smaller quick win instead
@@ -92,11 +112,16 @@ For each sub-task:
 If you see "This session is being continued from a previous conversation" or your context feels fresh:
 
 1. **Call `get_deep_work_status`** immediately — it has your deadline, plan, and progress
-2. **Run `date`** to check current time against deadline
-3. **If deadline hasn't passed**: Continue working from where `current` left off
-4. **If deadline has passed**: Go to Step 4 (wrap up)
+2. **Recall your working context** — search for the notes you saved during the work loop:
+   ```
+   mcp__nanoclaw__recall(query: "deep-work", memory_type: "knowledge", limit: 10)
+   ```
+   These memories contain the detailed context you need: which files you modified, what approach you were taking, gotchas you discovered. Read them carefully before resuming.
+3. **Run `date`** to check current time against deadline
+4. **If deadline hasn't passed**: Continue working from where `current` left off, using the recalled context
+5. **If deadline has passed**: Go to Step 4 (wrap up)
 
-The system auto-injects a continuation prompt if your context resets during an active session. Just call `get_deep_work_status` and pick up where you left off.
+The system auto-injects a continuation prompt if your context resets during an active session. Your `deep_work.json` has the high-level plan; your memories have the detailed working context.
 
 ## Step 4: Wrap Up (Last 10 Minutes)
 

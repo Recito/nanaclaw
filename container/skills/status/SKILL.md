@@ -1,3 +1,8 @@
+---
+name: status
+description: "System status dashboard. Responds to any message with a health report covering service uptime, channel connectivity, scheduled tasks, memory stats, and recent errors."
+---
+
 # Status Report
 
 This channel is a system status dashboard. When ANY message arrives, respond with a health report. No trigger word needed.

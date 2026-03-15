@@ -151,13 +151,18 @@ function checkDeepWorkContinuation(): string | null {
     return [
       `[DEEP WORK CONTINUATION — Your context was compacted but your deep work session is still active]`,
       ``,
+      `IMPORTANT: Stay in character. Follow your persona from CLAUDE.md — use the same language, tone, and communication style. Send messages via send_message, not plain text.`,
+      ``,
       `Read deep_work.json for your full state. Key info:`,
       `• Deadline: ${state.deadline_human} (~${remainingMin} min remaining)`,
       `• Goal: ${state.goal}`,
       `• Plan: ${state.plan.join(' → ')}`,
       `${completedStr}${currentStr}`,
       ``,
-      `Run \`date\` to verify current time, then continue working. Do NOT re-announce the plan or re-read the full codebase — pick up where you left off.`,
+      `BEFORE resuming work, recall your detailed working context:`,
+      `1. Call \`recall(query: "deep-work", memory_type: "knowledge", limit: 10)\` to recover notes about files modified, approaches taken, and key findings from earlier sub-tasks`,
+      `2. Run \`date\` to verify current time`,
+      `3. Then continue working — do NOT re-announce the plan or re-read the full codebase`,
     ].join('\n');
   } catch (err) {
     log(`Failed to read deep_work.json: ${err instanceof Error ? err.message : String(err)}`);
@@ -489,6 +494,7 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             NANOCLAW_WORK_DIR: '/workspace/group',
+            NANOCLAW_GLOBAL_MEMORY_DB: '/workspace/global/memory.db',
           },
         },
       },

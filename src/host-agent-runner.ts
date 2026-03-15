@@ -12,6 +12,7 @@
  *   NANOCLAW_SESSIONS_DIR — path to per-group sessions directory
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   query,
@@ -528,6 +529,9 @@ async function runQuery(
             NANOCLAW_MEMORY_DB:
               process.env.NANOCLAW_MEMORY_DB ||
               path.join(WORK_DIR, 'memory.db'),
+            NANOCLAW_GLOBAL_MEMORY_DB: GLOBAL_DIR
+              ? path.join(GLOBAL_DIR, 'memory.db')
+              : '',
           },
         },
       },
@@ -599,6 +603,32 @@ async function main(): Promise<void> {
   }
 
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
+
+  // Symlink group-specific skills into ~/.claude/skills/ so the SDK finds them
+  // without overriding CLAUDE_CONFIG_DIR (which breaks auth)
+  const groupSkillsDir = path.join(
+    process.env.NANOCLAW_DATA_DIR || path.join(process.cwd(), 'data'),
+    'sessions',
+    containerInput.groupFolder,
+    '.claude',
+    'skills',
+  );
+  const userSkillsDir = path.join(os.homedir(), '.claude', 'skills');
+  try {
+    if (fs.existsSync(groupSkillsDir)) {
+      const groupSkills = fs.readdirSync(groupSkillsDir);
+      for (const skill of groupSkills) {
+        const target = path.join(userSkillsDir, skill);
+        const source = path.join(groupSkillsDir, skill);
+        // Only symlink if not already present in user skills
+        if (!fs.existsSync(target)) {
+          fs.symlinkSync(source, target);
+        }
+      }
+    }
+  } catch (err) {
+    // Non-fatal: skills may not load but auth will work
+  }
 
   // MCP server is in the container agent-runner dist
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

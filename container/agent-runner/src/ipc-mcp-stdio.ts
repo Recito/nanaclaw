@@ -23,6 +23,20 @@ const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 
 // Working directory (for deep_work.json etc.)
 const WORK_DIR = process.env.NANOCLAW_WORK_DIR || '/workspace/group';
+
+// Global memory DB (read-only mount for non-main, used by recall/list with global:true)
+const GLOBAL_MEMORY_DB_PATH = process.env.NANOCLAW_GLOBAL_MEMORY_DB || '/workspace/global/memory.db';
+
+function getGlobalMemoryDb(): Database.Database | null {
+  try {
+    if (!fs.existsSync(GLOBAL_MEMORY_DB_PATH)) return null;
+    const db = new Database(GLOBAL_MEMORY_DB_PATH, { readonly: true });
+    db.pragma('journal_mode = WAL');
+    return db;
+  } catch {
+    return null;
+  }
+}
 const DEEP_WORK_PATH = path.join(WORK_DIR, 'deep_work.json');
 const DEEP_WORK_MEMORY_CATEGORY = 'deep-work';
 
@@ -390,9 +404,41 @@ Rules:
   {
     summary: z.string().describe('The fact or information to remember. Should be a clear, self-contained statement.'),
     memory_type: z.enum(MEMORY_TYPES).default('knowledge').describe('Category of memory'),
-    category: z.string().optional().describe('Optional topic tag (e.g., "food", "work", "family")'),
+    category: z.string().optional().describe('Optional topic tag (e.g., "food", "work", "family", "trading", "self/identity")'),
+    global: z.boolean().default(false).describe('Store in global memory (shared across all channels). Only "knowledge" type allowed for global. Use for domain insights, discoveries, and facts valuable everywhere.'),
   },
   async (args) => {
+    // Global write: send via IPC to host (which has write access to global memory.db)
+    if (args.global) {
+      if (args.memory_type !== 'knowledge') {
+        return { content: [{ type: 'text' as const, text: 'Global memory only accepts "knowledge" type. Use local memory for other types.' }], isError: true };
+      }
+      writeIpcFile(TASKS_DIR, {
+        type: 'global_memory_write',
+        summary: args.summary,
+        memory_type: 'knowledge',
+        category: args.category || null,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      // Also store locally for immediate access
+      const db = getMemoryDb();
+      if (db) {
+        try {
+          const contentHash = memoryContentHash(args.summary, args.memory_type);
+          const now = new Date().toISOString();
+          const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          db.prepare(
+            `INSERT OR IGNORE INTO memory_items (id, group_folder, memory_type, summary, content_hash, access_count, last_accessed_at, last_reinforced_at, created_at, updated_at, category, is_global, status, extra)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 1, 'active', NULL)`
+          ).run(id, groupFolder, args.memory_type, args.summary, contentHash, now, now, now, now, args.category || null);
+        } finally {
+          db.close();
+        }
+      }
+      return { content: [{ type: 'text' as const, text: `Remembered globally [knowledge]: "${args.summary}"` }] };
+    }
+
     const db = getMemoryDb();
     if (!db) {
       return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
@@ -438,11 +484,14 @@ Use this when you need to look up something you've previously stored — user pr
     query: z.string().describe('What to search for (keywords or natural language)'),
     memory_type: z.enum(MEMORY_TYPES).optional().describe('Filter by memory type'),
     limit: z.number().default(10).describe('Maximum results to return'),
+    global: z.boolean().default(false).describe('Search global memory (shared across all channels) instead of local.'),
   },
   async (args) => {
-    const db = getMemoryDb();
+    const db = args.global ? getGlobalMemoryDb() : getMemoryDb();
+    const folder = args.global ? 'global' : groupFolder;
+    const label = args.global ? 'Global memories' : 'Memories';
     if (!db) {
-      return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
+      return { content: [{ type: 'text' as const, text: `${label} database not available.` }], isError: true };
     }
 
     try {
@@ -455,7 +504,7 @@ Use this when you need to look up something you've previously stored — user pr
          JOIN memory_items m ON m.rowid = f.rowid
          WHERE memory_fts MATCH ? AND m.group_folder = ? AND m.status = 'active' ${typeFilter}
          ORDER BY rank LIMIT ?`
-      ).all(args.query, groupFolder, limit * 3) as (Record<string, unknown> & { rank: number })[];
+      ).all(args.query, folder, limit * 3) as (Record<string, unknown> & { rank: number })[];
 
       if (rows.length === 0) {
         // Fallback: simple LIKE search
@@ -463,23 +512,25 @@ Use this when you need to look up something you've previously stored — user pr
           `SELECT * FROM memory_items
            WHERE group_folder = ? AND status = 'active' AND summary LIKE ? ${typeFilter}
            ORDER BY last_accessed_at DESC LIMIT ?`
-        ).all(groupFolder, `%${args.query}%`, limit) as Record<string, unknown>[];
+        ).all(folder, `%${args.query}%`, limit) as Record<string, unknown>[];
 
         if (likeRows.length === 0) {
-          return { content: [{ type: 'text' as const, text: 'No memories found matching your query.' }] };
+          return { content: [{ type: 'text' as const, text: `No ${label.toLowerCase()} found matching your query.` }] };
         }
 
-        // Touch accessed items
-        const now = new Date().toISOString();
-        for (const row of likeRows) {
-          db.prepare(`UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?`)
-            .run(now, now, row.id);
+        // Touch accessed items (skip for read-only global db)
+        if (!args.global) {
+          const now = new Date().toISOString();
+          for (const row of likeRows) {
+            db.prepare(`UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?`)
+              .run(now, now, row.id);
+          }
         }
 
         const formatted = likeRows.map((r) =>
           `• [${r.memory_type}] ${r.summary} (accessed ${r.access_count}x${r.category ? `, #${r.category}` : ''})`
         ).join('\n');
-        return { content: [{ type: 'text' as const, text: `Memories (${likeRows.length} found):\n${formatted}` }] };
+        return { content: [{ type: 'text' as const, text: `${label} (${likeRows.length} found):\n${formatted}` }] };
       }
 
       // Score and rank by salience
@@ -496,18 +547,20 @@ Use this when you need to look up something you've previously stored — user pr
       scored.sort((a, b) => b.salience - a.salience);
       const top = scored.slice(0, limit);
 
-      // Touch accessed items
-      const now = new Date().toISOString();
-      for (const row of top) {
-        db.prepare(`UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?`)
-          .run(now, now, row.id);
+      // Touch accessed items (skip for read-only global db)
+      if (!args.global) {
+        const now = new Date().toISOString();
+        for (const row of top) {
+          db.prepare(`UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?`)
+            .run(now, now, row.id);
+        }
       }
 
       const formatted = top.map((r) =>
-        `• [${r.memory_type}] ${r.summary} (accessed ${r.access_count + 1}x, salience: ${r.salience.toFixed(2)}${r.category ? `, #${r.category}` : ''})`
+        `• [${r.memory_type}] ${r.summary} (accessed ${r.access_count + (args.global ? 0 : 1)}x, salience: ${r.salience.toFixed(2)}${r.category ? `, #${r.category}` : ''})`
       ).join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Memories (${top.length} found):\n${formatted}` }] };
+      return { content: [{ type: 'text' as const, text: `${label} (${top.length} found):\n${formatted}` }] };
     } finally {
       db.close();
     }
@@ -519,8 +572,50 @@ server.tool(
   'Remove a specific memory. Use when the user asks you to forget something or when information is outdated.',
   {
     query: z.string().describe('Search query to find the memory to forget, or the memory ID (mem-...) for exact match'),
+    global: z.boolean().default(false).describe('Forget from global memory instead of local.'),
   },
   async (args) => {
+    // Global forget: use IPC for write, but search read-only global DB to find match
+    if (args.global) {
+      if (args.query.startsWith('mem-')) {
+        writeIpcFile(TASKS_DIR, {
+          type: 'global_memory_forget',
+          memory_id: args.query,
+          groupFolder,
+          timestamp: new Date().toISOString(),
+        });
+        return { content: [{ type: 'text' as const, text: `Global memory ${args.query} forget queued.` }] };
+      }
+      // Search global DB to find the ID first
+      const globalDb = getGlobalMemoryDb();
+      if (!globalDb) {
+        return { content: [{ type: 'text' as const, text: 'Global memory database not available.' }], isError: true };
+      }
+      try {
+        const likeRows = globalDb.prepare(
+          `SELECT id, summary, memory_type FROM memory_items
+           WHERE group_folder = 'global' AND status = 'active' AND summary LIKE ?
+           LIMIT 5`
+        ).all(`%${args.query}%`) as { id: string; summary: string; memory_type: string }[];
+        if (likeRows.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No matching global memories found.' }] };
+        }
+        if (likeRows.length === 1) {
+          writeIpcFile(TASKS_DIR, {
+            type: 'global_memory_forget',
+            memory_id: likeRows[0].id,
+            groupFolder,
+            timestamp: new Date().toISOString(),
+          });
+          return { content: [{ type: 'text' as const, text: `Forgetting globally: [${likeRows[0].memory_type}] "${likeRows[0].summary}"` }] };
+        }
+        const list = likeRows.map((r) => `  ${r.id}: [${r.memory_type}] ${r.summary}`).join('\n');
+        return { content: [{ type: 'text' as const, text: `Multiple global matches. Call forget again with exact ID:\n${list}` }] };
+      } finally {
+        globalDb.close();
+      }
+    }
+
     const db = getMemoryDb();
     if (!db) {
       return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
@@ -581,20 +676,23 @@ server.tool(
 
 server.tool(
   'list_memories',
-  'List all stored memories, optionally filtered by type or category. Shows memory counts and summaries.',
+  'List all stored memories, optionally filtered by type or category. Shows memory counts and summaries. Set global=true to list from global (cross-channel) memory instead.',
   {
     memory_type: z.enum(MEMORY_TYPES).optional().describe('Filter by memory type'),
     category: z.string().optional().describe('Filter by category tag'),
+    global: z.boolean().optional().describe('If true, list from global (cross-channel) memory instead of this channel\'s memory'),
   },
   async (args) => {
-    const db = getMemoryDb();
+    const useGlobal = args.global === true;
+    const db = useGlobal ? getGlobalMemoryDb() : getMemoryDb();
     if (!db) {
-      return { content: [{ type: 'text' as const, text: 'Memory database not available.' }], isError: true };
+      return { content: [{ type: 'text' as const, text: useGlobal ? 'Global memory database not available.' : 'Memory database not available.' }], isError: true };
     }
 
     try {
+      const folder = useGlobal ? 'global' : groupFolder;
       let sql = `SELECT * FROM memory_items WHERE group_folder = ? AND status = 'active'`;
-      const params: unknown[] = [groupFolder];
+      const params: unknown[] = [folder];
 
       if (args.memory_type) {
         sql += ` AND memory_type = ?`;
@@ -609,13 +707,13 @@ server.tool(
       const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
 
       if (rows.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No memories stored.' }] };
+        return { content: [{ type: 'text' as const, text: useGlobal ? 'No global memories stored.' : 'No memories stored.' }] };
       }
 
       // Group count by type
       const countByType = db.prepare(
         `SELECT memory_type, COUNT(*) as count FROM memory_items WHERE group_folder = ? AND status = 'active' GROUP BY memory_type`
-      ).all(groupFolder) as { memory_type: string; count: number }[];
+      ).all(folder) as { memory_type: string; count: number }[];
 
       const totalCount = countByType.reduce((sum, r) => sum + r.count, 0);
       const typeSummary = countByType.map((r) => `${r.memory_type}: ${r.count}`).join(', ');
@@ -625,10 +723,11 @@ server.tool(
         return `• [${r.memory_type}] ${r.summary} (${r.access_count}x, salience: ${salience.toFixed(2)}${r.category ? `, #${r.category}` : ''})`;
       }).join('\n');
 
+      const label = useGlobal ? 'Global memories' : 'Memories';
       return {
         content: [{
           type: 'text' as const,
-          text: `Memories: ${totalCount} total (${typeSummary})\n\n${formatted}`,
+          text: `${label}: ${totalCount} total (${typeSummary})\n\n${formatted}`,
         }],
       };
     } finally {

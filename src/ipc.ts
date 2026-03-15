@@ -3,7 +3,9 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { createHash } from 'crypto';
+
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -178,6 +180,11 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For global_memory_write / global_memory_forget
+    summary?: string;
+    memory_type?: string;
+    category?: string;
+    memory_id?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -421,6 +428,109 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'global_memory_write': {
+      // Any group can write knowledge to global memory
+      if (data.memory_type !== 'knowledge') {
+        logger.warn(
+          { sourceGroup, memory_type: data.memory_type },
+          'Global memory write rejected: only knowledge type allowed',
+        );
+        break;
+      }
+      if (!data.summary) {
+        logger.warn({ sourceGroup }, 'Global memory write: missing summary');
+        break;
+      }
+      try {
+        const { getMemoryDb } = await import('./memory/db.js');
+        const globalDir = path.join(GROUPS_DIR, 'global');
+        const globalDb = getMemoryDb(globalDir);
+
+        const normalized = `${data.summary.trim().toLowerCase().replace(/\s+/g, ' ')}|${data.memory_type}`;
+        const contentHash = createHash('sha256')
+          .update(normalized)
+          .digest('hex')
+          .slice(0, 16);
+        const now = new Date().toISOString();
+
+        // Dedup check
+        const existing = globalDb
+          .prepare(
+            `SELECT id, access_count FROM memory_items WHERE content_hash = ? AND group_folder = 'global' AND status = 'active'`,
+          )
+          .get(contentHash) as
+          | { id: string; access_count: number }
+          | undefined;
+
+        if (existing) {
+          globalDb
+            .prepare(
+              `UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ?, last_reinforced_at = ?, updated_at = ? WHERE id = ?`,
+            )
+            .run(now, now, now, existing.id);
+          logger.info(
+            { sourceGroup, summary: data.summary.slice(0, 80) },
+            'Global memory reinforced via IPC',
+          );
+        } else {
+          const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          globalDb
+            .prepare(
+              `INSERT INTO memory_items (id, group_folder, memory_type, summary, content_hash, access_count, last_accessed_at, last_reinforced_at, created_at, updated_at, category, is_global, status, extra)
+               VALUES (?, 'global', 'knowledge', ?, ?, 1, ?, ?, ?, ?, ?, 1, 'active', NULL)`,
+            )
+            .run(
+              id,
+              data.summary,
+              contentHash,
+              now,
+              now,
+              now,
+              now,
+              data.category || null,
+            );
+          logger.info(
+            { sourceGroup, summary: data.summary.slice(0, 80) },
+            'Global memory written via IPC',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Failed to write global memory via IPC',
+        );
+      }
+      break;
+    }
+
+    case 'global_memory_forget': {
+      // Any group can forget global memories they know about
+      if (!data.memory_id) {
+        logger.warn({ sourceGroup }, 'Global memory forget: missing memory_id');
+        break;
+      }
+      try {
+        const { getMemoryDb } = await import('./memory/db.js');
+        const globalDir = path.join(GROUPS_DIR, 'global');
+        const globalDb = getMemoryDb(globalDir);
+        const result = globalDb
+          .prepare(`DELETE FROM memory_items WHERE id = ? AND group_folder = 'global'`)
+          .run(data.memory_id);
+        if (result.changes > 0) {
+          logger.info(
+            { sourceGroup, memory_id: data.memory_id },
+            'Global memory deleted via IPC',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Failed to delete global memory via IPC',
+        );
+      }
+      break;
+    }
 
     case 'register_group':
       // Only main group can register new groups

@@ -22,7 +22,9 @@ export interface AllowedRoot {
   // Absolute path or ~ for home (e.g., "~/projects", "/var/repos")
   path: string;
   // Whether read-write mounts are allowed under this root
-  allowReadWrite: boolean;
+  // Accepts both "readWrite" (config JSON) and "allowReadWrite" (legacy)
+  readWrite?: boolean;
+  allowReadWrite?: boolean;
   // Optional description for documentation
   description?: string;
 }

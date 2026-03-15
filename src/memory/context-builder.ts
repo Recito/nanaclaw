@@ -13,6 +13,7 @@ import { logger } from '../logger.js';
 
 const MAX_CONTEXT_CHARS = 2000;
 const MAX_ITEMS = 10;
+const MAX_CROSS_CHANNEL_CHARS = 800;
 
 /** Simple keyword extraction: split on whitespace, remove stopwords and short words. */
 function extractKeywords(text: string): string[] {
@@ -250,6 +251,61 @@ export function buildMemoryContext(
     return lines.length > 1 ? lines.join('\n') : '';
   } catch (err) {
     logger.debug({ err, groupFolder }, 'Failed to build memory context');
+    return '';
+  }
+}
+
+/**
+ * Build a summary of recent activity in OTHER channels.
+ * Scans conversation files from today/yesterday in sibling group directories.
+ */
+export function buildCrossChannelSummary(
+  currentGroupFolder: string,
+): string {
+  try {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const todayStr = today.toISOString().split('T')[0];
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    const entries: string[] = [];
+
+    const groupDirs = fs.readdirSync(GROUPS_DIR).filter((d) => {
+      if (d === currentGroupFolder || d === 'global') return false;
+      const stat = fs.statSync(path.join(GROUPS_DIR, d));
+      return stat.isDirectory();
+    });
+
+    for (const dir of groupDirs) {
+      const convDir = path.join(GROUPS_DIR, dir, 'conversations');
+      if (!fs.existsSync(convDir)) continue;
+
+      const files = fs.readdirSync(convDir).filter(
+        (f) => f.endsWith('.md') && (f.startsWith(todayStr) || f.startsWith(yesterdayStr)),
+      );
+      if (files.length === 0) continue;
+
+      // Extract conversation summaries from filenames
+      const summaries = files.map((f) => {
+        const name = f.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/\.md$/, '').replace(/-/g, ' ');
+        return name;
+      });
+
+      const channelName = dir.replace(/_/g, ' ').replace(/^discord /, '#');
+      entries.push(`• ${channelName}: ${files.length} conversation(s) — ${summaries.slice(0, 3).join(', ')}`);
+    }
+
+    if (entries.length === 0) return '';
+
+    const lines = ['## Recent Activity in Other Channels', ...entries];
+    let result = lines.join('\n');
+    if (result.length > MAX_CROSS_CHANNEL_CHARS) {
+      result = result.slice(0, MAX_CROSS_CHANNEL_CHARS) + '\n...';
+    }
+    return result;
+  } catch (err) {
+    logger.debug({ err }, 'Failed to build cross-channel summary');
     return '';
   }
 }

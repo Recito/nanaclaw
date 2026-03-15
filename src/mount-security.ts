@@ -177,6 +177,9 @@ export function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
 ): AllowedRoot | null {
+  let bestMatch: AllowedRoot | null = null;
+  let bestMatchLen = -1;
+
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
@@ -189,9 +192,15 @@ export function findAllowedRoot(
     // Check if realPath is under realRoot
     const relative = path.relative(realRoot, realPath);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-      return root;
+      // Pick the most specific (longest) matching root
+      if (realRoot.length > bestMatchLen) {
+        bestMatch = root;
+        bestMatchLen = realRoot.length;
+      }
     }
   }
+
+  return bestMatch;
 
   return null;
 }
@@ -294,16 +303,10 @@ export function validateMount(
   let effectiveReadonly = true; // Default to readonly
 
   if (requestedReadWrite) {
-    if (!isMain && allowlist.nonMainReadOnly) {
-      // Non-main groups forced to read-only
-      effectiveReadonly = true;
-      logger.info(
-        {
-          mount: mount.hostPath,
-        },
-        'Mount forced to read-only for non-main group',
-      );
-    } else if (!allowedRoot.allowReadWrite) {
+    // Accept both "readWrite" (config JSON) and "allowReadWrite" (legacy)
+    const rootAllowsRW = allowedRoot.readWrite === true || allowedRoot.allowReadWrite === true;
+
+    if (!rootAllowsRW) {
       // Root doesn't allow read-write
       effectiveReadonly = true;
       logger.info(
@@ -313,8 +316,17 @@ export function validateMount(
         },
         'Mount forced to read-only - root does not allow read-write',
       );
+    } else if (!isMain && allowlist.nonMainReadOnly && !rootAllowsRW) {
+      // Non-main groups forced to read-only (unless root explicitly allows RW)
+      effectiveReadonly = true;
+      logger.info(
+        {
+          mount: mount.hostPath,
+        },
+        'Mount forced to read-only for non-main group',
+      );
     } else {
-      // Read-write allowed
+      // Read-write allowed — root explicitly permits it
       effectiveReadonly = false;
     }
   }

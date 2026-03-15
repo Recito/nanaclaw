@@ -134,12 +134,14 @@ export async function runHostAgent(
   // Initialize per-group memory database and build context
   try {
     const { getMemoryDb } = await import('./memory/db.js');
-    const { buildMemoryContext } = await import('./memory/context-builder.js');
+    const { buildMemoryContext, buildCrossChannelSummary } = await import('./memory/context-builder.js');
     getMemoryDb(groupDir);
     const context = buildMemoryContext(group.folder, input.prompt, groupDir);
+    const crossChannel = buildCrossChannelSummary(group.folder);
+    const parts = [context, crossChannel].filter(Boolean);
     const contextPath = path.join(groupDir, 'memory_context.md');
-    if (context) {
-      fs.writeFileSync(contextPath, context);
+    if (parts.length > 0) {
+      fs.writeFileSync(contextPath, parts.join('\n\n'));
     } else {
       try {
         fs.unlinkSync(contextPath);

@@ -59,6 +59,27 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+/**
+ * Detect if a message contains a time budget / deadline that should trigger
+ * a fresh session (no resume) so the agent picks up the latest skills.
+ */
+const TIME_BUDGET_PATTERNS = [
+  // English durations
+  /\b(?:give|giving|have|spend|take|work)\b.{0,30}\b\d+\s*(?:hour|hr|minute|min)\b/i,
+  /\b(?:next|for)\s+\d+\s*(?:hour|hr|minute|min)/i,
+  /\buntil\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i,
+  /\bby\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i,
+  /\bdeadline\b/i,
+  // Chinese durations
+  /(?:给你?|再给|花|用)\s*(?:\d+|[一二三四五六七八九十两半]+)\s*(?:个?小时|分钟|个?钟头)/,
+  /(?:到|直到|做到)\s*(?:\d{1,2}[点时]|早上|下午|晚上|明天)/,
+  /半小时|一小时|两小时|三小时/,
+];
+
+function isTimeBudgetRequest(prompt: string): boolean {
+  return TIME_BUDGET_PATTERNS.some((p) => p.test(prompt));
+}
+
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
@@ -217,9 +238,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
+      // Suppress duplicate acknowledgments — agent already sent content via send_message
+      const isDuplicateAck = /^(No response requested|already (sent|reported|responded)|results already sent)/i.test(text);
+      if (text && !isDuplicateAck) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+      } else if (isDuplicateAck) {
+        logger.debug({ group: group.name }, 'Suppressed duplicate acknowledgment output');
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -267,7 +292,9 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = isTimeBudgetRequest(prompt)
+    ? undefined
+    : sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();

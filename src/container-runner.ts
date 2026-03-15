@@ -29,7 +29,7 @@ import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { getMemoryDb } from './memory/db.js';
-import { buildMemoryContext } from './memory/context-builder.js';
+import { buildMemoryContext, buildCrossChannelSummary } from './memory/context-builder.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -47,11 +47,14 @@ function initMemoryForAgent(
     // Ensure memory.db exists (schema applied on open)
     getMemoryDb(groupDir);
 
-    // Build and write context file
+    // Build memory context and cross-channel summary
     const context = buildMemoryContext(groupFolder, prompt, groupDir);
+    const crossChannel = buildCrossChannelSummary(groupFolder);
+
+    const parts = [context, crossChannel].filter(Boolean);
     const contextPath = path.join(groupDir, 'memory_context.md');
-    if (context) {
-      fs.writeFileSync(contextPath, context);
+    if (parts.length > 0) {
+      fs.writeFileSync(contextPath, parts.join('\n\n'));
     } else {
       // Remove stale context file
       try {
