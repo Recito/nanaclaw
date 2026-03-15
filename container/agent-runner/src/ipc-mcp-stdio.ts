@@ -736,6 +736,291 @@ server.tool(
   },
 );
 
+// --- Knowledge Tools ---
+// Knowledge = generalized principles distinct from episodic memory.
+// Uses knowledge_entries table with FTS5, confidence tracking, and derivation chains.
+
+function knowledgeContentHash(title: string, domain: string): string {
+  const normalized = `${title.toLowerCase().trim().replace(/\s+/g, ' ')}|${domain.toLowerCase().trim()}`;
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+}
+
+function ensureKnowledgeSchema(db: Database.Database): void {
+  // Create table if not exists (safe to call repeatedly)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_entries (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.5
+        CHECK(confidence >= 0.0 AND confidence <= 1.0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_validated TEXT NOT NULL,
+      derived_from TEXT,
+      contradicted_by TEXT,
+      is_global INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active','superseded','refuted'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_knowledge_domain ON knowledge_entries(domain);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_status ON knowledge_entries(status);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_global ON knowledge_entries(is_global);
+  `);
+  // FTS5 — may already exist, ignore errors
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+        title, content,
+        content='knowledge_entries',
+        content_rowid='rowid',
+        tokenize='porter unicode61'
+      );
+      CREATE TRIGGER IF NOT EXISTS knowledge_fts_insert AFTER INSERT ON knowledge_entries BEGIN
+        INSERT INTO knowledge_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS knowledge_fts_delete AFTER DELETE ON knowledge_entries BEGIN
+        INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content)
+          VALUES ('delete', old.rowid, old.title, old.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS knowledge_fts_update
+        AFTER UPDATE OF title, content ON knowledge_entries BEGIN
+        INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content)
+          VALUES ('delete', old.rowid, old.title, old.content);
+        INSERT INTO knowledge_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END;
+    `);
+  } catch { /* triggers/FTS already exist */ }
+}
+
+server.tool(
+  'knowledge_search',
+  `Search your accumulated domain knowledge. Knowledge entries are generalized principles, heuristics, and insights — NOT episodic memories.
+
+Use this when you need domain expertise you've built up over time. Knowledge entries include confidence levels (0-1) and links to the memories they were derived from.`,
+  {
+    query: z.string().describe('What to search for (keywords or natural language)'),
+    domain: z.string().optional().describe('Filter by domain (e.g., "renovation-planning", "cooking", "meta")'),
+    min_confidence: z.number().optional().describe('Minimum confidence threshold (0-1, default 0)'),
+    global: z.boolean().default(false).describe('Search global knowledge instead of local'),
+  },
+  async (args) => {
+    const db = args.global ? getGlobalMemoryDb() : getMemoryDb();
+    const label = args.global ? 'Global knowledge' : 'Knowledge';
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: `${label} database not available.` }], isError: true };
+    }
+
+    try {
+      ensureKnowledgeSchema(db);
+      const folder = args.global ? 'global' : groupFolder;
+      const limit = 10;
+      const minConf = args.min_confidence ?? 0;
+
+      // Build WHERE conditions
+      const conditions = ["k.status = 'active'", 'k.group_folder = ?'];
+      const params: unknown[] = [folder];
+
+      if (args.domain) {
+        conditions.push('k.domain = ?');
+        params.push(args.domain);
+      }
+      if (minConf > 0) {
+        conditions.push('k.confidence >= ?');
+        params.push(minConf);
+      }
+
+      const whereClause = conditions.join(' AND ');
+
+      // Try FTS5 search
+      if (args.query.trim()) {
+        try {
+          const ftsQuery = args.query
+            .replace(/[^\w\s\u4e00-\u9fff]/g, '')
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean)
+            .join(' OR ');
+
+          if (ftsQuery) {
+            const rows = db.prepare(
+              `SELECT k.* FROM knowledge_entries k
+               JOIN knowledge_fts f ON k.rowid = f.rowid
+               WHERE f.knowledge_fts MATCH ? AND ${whereClause}
+               ORDER BY rank LIMIT ?`
+            ).all(ftsQuery, ...params, limit) as Record<string, unknown>[];
+
+            if (rows.length > 0) {
+              const formatted = rows.map((r) =>
+                `• [${r.domain}] ${r.title} (confidence: ${(r.confidence as number).toFixed(2)})\n  ${r.content}`
+              ).join('\n');
+              return { content: [{ type: 'text' as const, text: `${label} (${rows.length} found):\n${formatted}` }] };
+            }
+          }
+        } catch { /* fall through */ }
+
+        // Fallback LIKE search
+        const rows = db.prepare(
+          `SELECT k.* FROM knowledge_entries k
+           WHERE ${whereClause} AND (k.title LIKE ? OR k.content LIKE ?)
+           ORDER BY k.confidence DESC LIMIT ?`
+        ).all(...params, `%${args.query}%`, `%${args.query}%`, limit) as Record<string, unknown>[];
+
+        if (rows.length > 0) {
+          const formatted = rows.map((r) =>
+            `• [${r.domain}] ${r.title} (confidence: ${(r.confidence as number).toFixed(2)})\n  ${r.content}`
+          ).join('\n');
+          return { content: [{ type: 'text' as const, text: `${label} (${rows.length} found):\n${formatted}` }] };
+        }
+      }
+
+      return { content: [{ type: 'text' as const, text: `No ${label.toLowerCase()} found matching your query.` }] };
+    } finally {
+      if (!args.global) db.close();
+    }
+  },
+);
+
+server.tool(
+  'knowledge_write',
+  `Store a piece of domain knowledge — a generalized principle, heuristic, or insight derived from experience.
+
+Knowledge is different from memory:
+• Memory = episodic facts ("Jake prefers concise answers")
+• Knowledge = generalized principles ("When scoping demo work, always confirm structural assessment first")
+
+Include derived_from to link knowledge to the memories it came from. Duplicate titles within a domain update the existing entry instead of creating a new one.`,
+  {
+    domain: z.string().describe('Knowledge domain (e.g., "renovation-planning", "cooking", "communication", "meta")'),
+    title: z.string().describe('Short title for this knowledge entry'),
+    content: z.string().describe('The knowledge itself — a principle, heuristic, or insight'),
+    confidence: z.number().optional().describe('Confidence level 0-1 (default 0.5). Higher = more validated.'),
+    derived_from: z.array(z.string()).optional().describe('Memory IDs this knowledge was derived from'),
+    global: z.boolean().default(false).describe('Store globally (shared across all channels)'),
+  },
+  async (args) => {
+    // Global write: send via IPC to host
+    if (args.global) {
+      writeIpcFile(TASKS_DIR, {
+        type: 'global_knowledge_write',
+        domain: args.domain,
+        title: args.title,
+        content: args.content,
+        confidence: args.confidence ?? 0.5,
+        derived_from: args.derived_from || null,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Knowledge stored globally: [${args.domain}] "${args.title}" (confidence: ${args.confidence ?? 0.5})` }] };
+    }
+
+    const db = getMemoryDb();
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: 'Knowledge database not available.' }], isError: true };
+    }
+
+    try {
+      ensureKnowledgeSchema(db);
+      const now = new Date().toISOString();
+      const hash = knowledgeContentHash(args.title, args.domain);
+
+      // Check for existing entry with same title+domain
+      const existing = db.prepare(
+        `SELECT id, title, domain FROM knowledge_entries
+         WHERE group_folder = ? AND status = 'active'`
+      ).all(groupFolder) as { id: string; title: string; domain: string }[];
+
+      for (const row of existing) {
+        if (knowledgeContentHash(row.title, row.domain) === hash) {
+          // Update existing entry
+          db.prepare(
+            `UPDATE knowledge_entries SET content = ?, confidence = ?, updated_at = ?, last_validated = ?,
+             derived_from = COALESCE(?, derived_from)
+             WHERE id = ?`
+          ).run(args.content, args.confidence ?? 0.5, now, now, args.derived_from ? JSON.stringify(args.derived_from) : null, row.id);
+          return { content: [{ type: 'text' as const, text: `Knowledge updated: [${args.domain}] "${args.title}" (confidence: ${args.confidence ?? 0.5})` }] };
+        }
+      }
+
+      // Create new entry
+      const id = `know-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(
+        `INSERT INTO knowledge_entries
+         (id, group_folder, domain, title, content, confidence, created_at, updated_at, last_validated, derived_from, is_global, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active')`
+      ).run(id, groupFolder, args.domain, args.title, args.content, args.confidence ?? 0.5, now, now, now,
+        args.derived_from ? JSON.stringify(args.derived_from) : null);
+
+      return { content: [{ type: 'text' as const, text: `Knowledge stored: [${args.domain}] "${args.title}" (confidence: ${args.confidence ?? 0.5})` }] };
+    } finally {
+      db.close();
+    }
+  },
+);
+
+server.tool(
+  'knowledge_update',
+  `Update an existing knowledge entry. Use to adjust confidence, add contradictions, or refine content.
+
+When new experience contradicts existing knowledge, lower confidence AND flag the contradiction.`,
+  {
+    id: z.string().describe('Knowledge entry ID (know-...)'),
+    confidence: z.number().optional().describe('New confidence level (0-1)'),
+    content: z.string().optional().describe('Updated content'),
+    contradicted_by: z.array(z.string()).optional().describe('IDs of entries or memories that contradict this'),
+    status: z.enum(['active', 'superseded', 'refuted']).optional().describe('New status'),
+    global: z.boolean().default(false).describe('Update in global knowledge store'),
+  },
+  async (args) => {
+    if (args.global) {
+      writeIpcFile(TASKS_DIR, {
+        type: 'global_knowledge_update',
+        knowledgeId: args.id,
+        confidence: args.confidence,
+        content: args.content,
+        contradicted_by: args.contradicted_by || null,
+        status: args.status,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Knowledge update queued for ${args.id}.` }] };
+    }
+
+    const db = getMemoryDb();
+    if (!db) {
+      return { content: [{ type: 'text' as const, text: 'Knowledge database not available.' }], isError: true };
+    }
+
+    try {
+      ensureKnowledgeSchema(db);
+      const now = new Date().toISOString();
+      const fields: string[] = ['updated_at = ?'];
+      const values: unknown[] = [now];
+
+      if (args.confidence !== undefined) { fields.push('confidence = ?'); values.push(args.confidence); }
+      if (args.content !== undefined) { fields.push('content = ?'); values.push(args.content); }
+      if (args.contradicted_by) { fields.push('contradicted_by = ?'); values.push(JSON.stringify(args.contradicted_by)); }
+      if (args.status !== undefined) { fields.push('status = ?'); values.push(args.status); }
+
+      values.push(args.id);
+      const result = db.prepare(
+        `UPDATE knowledge_entries SET ${fields.join(', ')} WHERE id = ?`
+      ).run(...values);
+
+      if (result.changes === 0) {
+        return { content: [{ type: 'text' as const, text: `Knowledge entry ${args.id} not found.` }], isError: true };
+      }
+
+      return { content: [{ type: 'text' as const, text: `Knowledge ${args.id} updated.` }] };
+    } finally {
+      db.close();
+    }
+  },
+);
+
 // --- Deep Work Tools ---
 
 interface DeepWorkState {
@@ -924,10 +1209,17 @@ server.tool(
     const nowUnix = Math.floor(Date.now() / 1000);
     const remainingMin = Math.round((newState.deadline_unix - nowUnix) / 60);
 
+    // Push back if agent tries to mark session complete with significant time remaining
+    const currentLower = (newState.current || '').toLowerCase();
+    const looksComplete = /\b(complete|done|finished|wrapped|wrapping|waiting|idle)\b/.test(currentLower);
+    const earlyCompletionWarning = looksComplete && remainingMin > 30
+      ? `\n\n⚠️ You still have ~${remainingMin} min (${Math.round(remainingMin / 60 * 10) / 10} hours) remaining. Do NOT wrap up early. The user gave you this time — find more to do: deeper analysis, edge cases, documentation, tests, optimizations, or explore adjacent ideas. Update current_task with your next action.`
+      : '';
+
     return {
       content: [{
         type: 'text' as const,
-        text: `Progress updated. ~${remainingMin} min remaining. Completed: ${newState.completed.length}/${newState.completed.length + newState.plan.length} tasks.${newState.current ? ` Current: ${newState.current}` : ''}`,
+        text: `Progress updated. ~${remainingMin} min remaining. Completed: ${newState.completed.length}/${newState.completed.length + newState.plan.length} tasks.${newState.current ? ` Current: ${newState.current}` : ''}${earlyCompletionWarning}`,
       }],
     };
   },
@@ -945,8 +1237,21 @@ server.tool(
       return { content: [{ type: 'text' as const, text: 'No active deep work session.' }] };
     }
 
+    // Refuse to end if significant time remains
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const remainingMin = Math.round((state.deadline_unix - nowUnix) / 60);
+    if (remainingMin > 30) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `⚠️ Cannot end session — ${remainingMin} minutes (~${Math.round(remainingMin / 60 * 10) / 10} hours) still remaining until ${state.deadline_human}. The user gave you this time block. Find more to do: go deeper on existing work, run more experiments, write tests, improve documentation, explore adjacent ideas, or optimize what you built. Only end_deep_work is blocked — you can still update_deep_work to track new tasks.`,
+        }],
+        isError: true,
+      };
+    }
+
     // Build completion report
-    const durationMin = Math.round((Math.floor(Date.now() / 1000) - Math.floor(new Date(state.started_at).getTime() / 1000)) / 60);
+    const durationMin = Math.round((nowUnix - Math.floor(new Date(state.started_at).getTime() / 1000)) / 60);
     const report = [
       `Deep work session ended.`,
       `Duration: ${durationMin} minutes.`,

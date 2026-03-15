@@ -480,4 +480,26 @@ describe('decayOldMemories', () => {
     const archived = decayOldMemories(db, 'g1', 180, 3);
     expect(archived).toBe(0);
   });
+
+  it('does not archive self-knowledge memories', () => {
+    const item = createItem(db, {
+      group_folder: 'g1',
+      memory_type: 'behavior',
+      summary: 'I tend to over-explain simple questions',
+      category: 'self/observations',
+    });
+
+    const oldDate = new Date(
+      Date.now() - 200 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    db.prepare(
+      `UPDATE memory_items SET last_accessed_at = ?, access_count = 1 WHERE id = ?`,
+    ).run(oldDate, item.id);
+
+    const archived = decayOldMemories(db, 'g1', 180, 3);
+    expect(archived).toBe(0);
+
+    const updated = getItemById(db, item.id)!;
+    expect(updated.status).toBe('active');
+  });
 });

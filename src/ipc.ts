@@ -185,6 +185,15 @@ export async function processTaskIpc(
     memory_type?: string;
     category?: string;
     memory_id?: string;
+    // For global_knowledge_write / global_knowledge_update
+    domain?: string;
+    title?: string;
+    content?: string;
+    confidence?: number;
+    derived_from?: string[];
+    contradicted_by?: string[];
+    knowledgeId?: string;
+    status?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -527,6 +536,87 @@ export async function processTaskIpc(
         logger.error(
           { err, sourceGroup },
           'Failed to delete global memory via IPC',
+        );
+      }
+      break;
+    }
+
+    case 'global_knowledge_write': {
+      // Any group can write knowledge entries to global knowledge store
+      if (!data.domain || !data.title || !data.content) {
+        logger.warn(
+          { sourceGroup },
+          'Global knowledge write: missing required fields',
+        );
+        break;
+      }
+      try {
+        const { getMemoryDb } = await import('./memory/db.js');
+        const { createKnowledge } = await import(
+          './memory/knowledge-repository.js'
+        );
+        const globalDir = path.join(GROUPS_DIR, 'global');
+        const globalDb = getMemoryDb(globalDir);
+
+        createKnowledge(globalDb, {
+          group_folder: 'global',
+          domain: data.domain,
+          title: data.title,
+          content: data.content,
+          confidence: data.confidence ?? 0.5,
+          derived_from: data.derived_from || undefined,
+          is_global: true,
+        });
+        logger.info(
+          {
+            sourceGroup,
+            domain: data.domain,
+            title: data.title?.slice(0, 60),
+          },
+          'Global knowledge written via IPC',
+        );
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Failed to write global knowledge via IPC',
+        );
+      }
+      break;
+    }
+
+    case 'global_knowledge_update': {
+      // Any group can update global knowledge entries
+      if (!data.knowledgeId) {
+        logger.warn(
+          { sourceGroup },
+          'Global knowledge update: missing knowledgeId',
+        );
+        break;
+      }
+      try {
+        const { getMemoryDb } = await import('./memory/db.js');
+        const { updateKnowledge } = await import(
+          './memory/knowledge-repository.js'
+        );
+        const globalDir = path.join(GROUPS_DIR, 'global');
+        const globalDb = getMemoryDb(globalDir);
+
+        const updates: Record<string, unknown> = {};
+        if (data.confidence !== undefined) updates.confidence = data.confidence;
+        if (data.content !== undefined) updates.content = data.content;
+        if (data.contradicted_by)
+          updates.contradicted_by = data.contradicted_by;
+        if (data.status !== undefined) updates.status = data.status;
+
+        updateKnowledge(globalDb, data.knowledgeId, updates);
+        logger.info(
+          { sourceGroup, knowledgeId: data.knowledgeId },
+          'Global knowledge updated via IPC',
+        );
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Failed to update global knowledge via IPC',
         );
       }
       break;

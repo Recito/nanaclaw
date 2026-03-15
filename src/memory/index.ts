@@ -28,3 +28,16 @@ export type {
   CreateMemoryInput,
 } from './types.js';
 export { MEMORY_TYPES } from './types.js';
+export {
+  createKnowledge,
+  updateKnowledge,
+  searchKnowledge,
+  listKnowledge,
+  getKnowledgeById,
+} from './knowledge-repository.js';
+export type {
+  KnowledgeEntry,
+  CreateKnowledgeInput,
+  UpdateKnowledgeInput,
+  KnowledgeSearchOptions,
+} from './knowledge-types.js';

@@ -436,6 +436,29 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Load self files (PERSONA.md, STATE.md, VALUES.md) — identity that persists across sessions
+  const selfFiles = ['PERSONA.md', 'STATE.md', 'VALUES.md'];
+  for (const file of selfFiles) {
+    // Load from group dir (STATE.md is per-group, written by host)
+    const groupPath = `/workspace/group/${file}`;
+    if (fs.existsSync(groupPath)) {
+      const content = fs.readFileSync(groupPath, 'utf-8');
+      if (content.trim()) {
+        globalClaudeMd = (globalClaudeMd || '') + '\n\n' + content;
+      }
+    }
+    // For non-main groups, also load global PERSONA.md and VALUES.md
+    if (!containerInput.isMain && file !== 'STATE.md') {
+      const globalPath = `/workspace/global/${file}`;
+      if (fs.existsSync(globalPath)) {
+        const content = fs.readFileSync(globalPath, 'utf-8');
+        if (content.trim()) {
+          globalClaudeMd = (globalClaudeMd || '') + '\n\n' + content;
+        }
+      }
+    }
+  }
+
   // Append memory context if available (written by host before spawn)
   const memoryContextPath = '/workspace/group/memory_context.md';
   if (fs.existsSync(memoryContextPath)) {

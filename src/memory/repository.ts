@@ -332,7 +332,8 @@ export function decayOldMemories(
          AND status = 'active'
          AND is_global = 0
          AND last_accessed_at < ?
-         AND access_count < ?`,
+         AND access_count < ?
+         AND (category IS NULL OR category NOT LIKE 'self/%')`,
     )
     .run(now(), groupFolder, cutoff, minAccessCount);
 

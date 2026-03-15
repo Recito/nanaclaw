@@ -1,11 +1,11 @@
 ---
 name: persona
-description: Interactive persona builder for NanoClaw agents. Walks through guided questions to define the assistant's personality, then generates and writes CLAUDE.md files. Use for first-time setup or to redesign an existing persona.
+description: Interactive persona builder for NanoClaw agents. Walks through guided questions to define the assistant's personality, then generates and writes PERSONA.md (identity) and updates CLAUDE.md to reference it. Use for first-time setup or to redesign an existing persona.
 ---
 
 # Persona Builder
 
-Build an agent persona through guided questions, then generate the CLAUDE.md files.
+Build an agent persona through guided questions, then generate PERSONA.md (identity) and update CLAUDE.md to reference it.
 
 ## Workflow
 
@@ -138,7 +138,33 @@ Supportive:
 
 ## Writing the Files
 
-### 1. Main group CLAUDE.md
+### 1. PERSONA.md (primary identity file)
+
+Write the generated persona to `groups/global/PERSONA.md`. This is the single source of truth for identity.
+
+Format:
+```markdown
+# {name}
+
+{Full generated persona content from template above}
+
+## Self-Observations
+<!-- Agent appends here during nightly reflection. Do not edit manually. -->
+```
+
+If `PERSONA.md` already exists, preserve the `## Self-Observations` section (agent-written content). Replace everything above it.
+
+### 2. Global CLAUDE.md
+
+In `groups/global/CLAUDE.md`, replace any inline persona section with a reference:
+
+```markdown
+**Identity**: Read PERSONA.md for who you are. That file is your core identity.
+```
+
+Keep all other sections intact (Communication, Memory, Inner Orientation, Formatting, Security, etc.).
+
+### 3. Main group CLAUDE.md
 
 Read the current main group CLAUDE.md (find it by checking which group has `is_main = 1`):
 
@@ -146,13 +172,7 @@ Read the current main group CLAUDE.md (find it by checking which group has `is_m
 sqlite3 store/messages.db "SELECT folder FROM registered_groups WHERE is_main = 1;"
 ```
 
-Replace ONLY the persona section (from `# {name}` down to the line before `## What You Can Do`). Keep all other sections intact (Communication, Memory, Formatting, Security, etc.).
-
-If the main group CLAUDE.md doesn't exist yet, generate the full file using `groups/global/CLAUDE.md` as the template and inserting the persona at the top.
-
-### 2. Global CLAUDE.md
-
-Same replacement in `groups/global/CLAUDE.md` — swap the persona section, keep everything else.
+Replace any inline persona section with a reference to PERSONA.md (same as global). Channel-specific behavior rules (tone calibration, language mix overrides) stay in the per-group file.
 
 ### 3. Update assistant name (if changed)
 

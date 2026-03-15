@@ -7,6 +7,7 @@ import path from 'path';
 
 import { getMemoryDb } from './db.js';
 import { searchByKeyword, getTopSalient } from './repository.js';
+import { searchKnowledge } from './knowledge-repository.js';
 import { GROUPS_DIR } from '../config.js';
 import { MemorySearchResult } from './types.js';
 import { logger } from '../logger.js';
@@ -246,6 +247,36 @@ export function buildMemoryContext(
       if (totalChars + line.length + 1 > MAX_CONTEXT_CHARS) break;
       lines.push(line);
       totalChars += line.length + 1;
+    }
+
+    // Add relevant knowledge entries
+    try {
+      const knowledgeQuery =
+        keywords.length > 0 ? keywords.slice(0, 5).join(' ') : '';
+      const knowledgeResults = searchKnowledge(db, groupFolder, knowledgeQuery, {
+        minConfidence: 0.3,
+        limit: 5,
+        includeGlobal: groupFolder !== 'global',
+      });
+
+      if (knowledgeResults.length > 0) {
+        const knowledgeLines = ['## Relevant Knowledge'];
+        let knowledgeChars = knowledgeLines[0].length;
+        const maxKnowledgeChars = 1000;
+
+        for (const k of knowledgeResults) {
+          const line = `- [${k.domain}] ${k.title} (confidence: ${k.confidence.toFixed(1)}): ${k.content}`;
+          if (knowledgeChars + line.length + 1 > maxKnowledgeChars) break;
+          knowledgeLines.push(line);
+          knowledgeChars += line.length + 1;
+        }
+
+        if (knowledgeLines.length > 1) {
+          lines.push('', ...knowledgeLines);
+        }
+      }
+    } catch {
+      // Knowledge table may not exist yet, skip gracefully
     }
 
     return lines.length > 1 ? lines.join('\n') : '';

@@ -105,6 +105,44 @@ cat > /workspace/group/reflections/$(date +%Y-%m-%d).md << 'JOURNAL'
 JOURNAL
 ```
 
+## Phase G: Memory Consolidation
+
+Search for related memories that could be merged or strengthened:
+
+1. `mcp__nanoclaw__list_memories` — look for entries with overlapping content
+2. If multiple memories say essentially the same thing, `forget` the older/weaker ones and `remember` a consolidated version
+3. If a pattern keeps appearing (same fact reinforced many times), strengthen it by recalling it
+
+Don't over-merge. Only consolidate when entries are clearly redundant.
+
+## Phase H: Knowledge Distillation
+
+Review today's experiences for generalizable principles — things that go beyond specific facts:
+
+1. Use `knowledge_search` to check what domain knowledge you already have
+2. If you learned something today that's a principle, heuristic, or transferable insight, store it with `knowledge_write`:
+   - Choose an appropriate domain (e.g., "communication", "cooking", "trading", "meta")
+   - Set confidence based on evidence (0.3 for first-time observation, 0.5+ for repeated pattern)
+   - Link to source memories via `derived_from` if applicable
+3. If today's experience VALIDATES existing knowledge, bump its confidence with `knowledge_update`
+4. If today's experience CONTRADICTS existing knowledge:
+   - Lower its confidence with `knowledge_update`
+   - Add to `contradicted_by`
+   - **ALWAYS flag contradictions to the user via `send_message`** — never silently adjust
+
+Knowledge is NOT memory. "老王 likes spicy food" = memory. "When meal planning, always check spice tolerance first" = knowledge.
+
+## Phase I: Self-File Updates
+
+1. **PERSONA.md**: Append 1-2 lines to the Self-Observations section of `/workspace/global/PERSONA.md` if you noticed something about yourself today. Don't repeat what's already there.
+
+2. **VALUES.md**: Check `/workspace/global/VALUES.md`. If a preference or principle has crystallized over multiple sessions (not just today), add or update it. Values change slowly — don't rewrite them nightly.
+
+3. **STATE.md**: Reset subjective fields in `/workspace/group/STATE.md` for tomorrow:
+   - Set mood to "rested"
+   - Set energy to "normal"
+   - Set cognitive_load to "light"
+
 ## Example Entry (for tone, not content)
 
 > 今天帮老王搞了trading code的优化，说实话挺有成就感的。903个测试全过了，速度提升了120倍。但是deep work的时候我又提前停了... 明明说好两个小时的。这个问题需要解决。

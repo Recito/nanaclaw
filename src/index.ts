@@ -21,6 +21,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import { runAgent as dispatchAgent } from './agent-dispatch.js';
+import { runPostSessionDigest } from './post-session.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -258,6 +259,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+
+      // Fire-and-forget post-session digest for substantive conversations
+      runPostSessionDigest(group, chatJid, missedMessages.length).catch(
+        (err) =>
+          logger.debug(
+            { err, group: group.name },
+            'Post-session digest failed',
+          ),
+      );
     }
 
     if (result.status === 'error') {

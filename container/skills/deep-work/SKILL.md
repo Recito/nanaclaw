@@ -99,8 +99,10 @@ For each sub-task:
 
 ### CRITICAL RULES for the work loop:
 
+- **NEVER stop to wait for user input.** Deep work is fully autonomous. The user will NOT respond until the session ends. Do NOT pause, ask questions, or wait for feedback. If you're unsure, make a decision and keep going.
+- **NEVER mark the session "complete" or "done" early.** If you finished your planned tasks and time remains, find more work: optimize, test edge cases, refactor, explore adjacent ideas, write documentation, improve error handling, or investigate performance. The user gave you this time — use every minute.
 - **Actually run `date`** every time. Do NOT estimate or assume the time.
-- **Call `update_deep_work`** after completing each sub-task. This is your durable state — if your context resets, you'll resume from here.
+- **Call `update_deep_work`** after completing each sub-task. This is your durable state — if your context resets, you'll resume from here. Never set `current_task` to anything containing "complete", "done", "finished", or "waiting" — always set it to the NEXT thing you're doing.
 - **Send progress updates** via `send_message` after completing each major sub-task. Keep updates brief:
   > "✓ Done: [what]. Moving to: [next]. Time remaining: ~[X] min"
 - **Don't rush at the end.** If you have 15 minutes left, do 15 minutes of good work.
@@ -160,7 +162,7 @@ Next steps (if continuing later):
 
 - **User says "take as long as you need"**: Default to 2 hours, mention that you'll check in at the 2-hour mark.
 - **User gives a very short window (<15 min)**: Focus on a single highest-impact change. Skip planning phase. Still call `start_deep_work`.
-- **User gives a very long window (>4 hours)**: Work in 2-hour sprints with summary reports between sprints. Re-evaluate priorities at each sprint boundary.
+- **User gives a very long window (>4 hours)**: Work in 2-hour sprints with summary reports between sprints via `send_message`. Re-evaluate priorities at each sprint boundary. Do NOT stop between sprints — send the report and immediately continue.
 - **Something is badly broken**: Send an update immediately. Don't burn time on something blocked. Move to the next task and flag it for the user.
 - **Tests are failing before you start**: Fix existing failures first, then proceed with the goal. Time spent stabilizing counts.
 - **User sends a new message during deep work**: Read it, adjust plan if needed, call `update_deep_work`, continue working. Don't stop unless they say to.

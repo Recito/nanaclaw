@@ -51,9 +51,61 @@ const FTS_SQL = `
   END;
 `;
 
+const KNOWLEDGE_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS knowledge_entries (
+    id TEXT PRIMARY KEY,
+    group_folder TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5
+      CHECK(confidence >= 0.0 AND confidence <= 1.0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_validated TEXT NOT NULL,
+    derived_from TEXT,
+    contradicted_by TEXT,
+    is_global INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active'
+      CHECK(status IN ('active','superseded','refuted'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_knowledge_domain ON knowledge_entries(domain);
+  CREATE INDEX IF NOT EXISTS idx_knowledge_status ON knowledge_entries(status);
+  CREATE INDEX IF NOT EXISTS idx_knowledge_global ON knowledge_entries(is_global);
+`;
+
+const KNOWLEDGE_FTS_SQL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+    title, content,
+    content='knowledge_entries',
+    content_rowid='rowid',
+    tokenize='porter unicode61'
+  );
+
+  CREATE TRIGGER IF NOT EXISTS knowledge_fts_insert AFTER INSERT ON knowledge_entries BEGIN
+    INSERT INTO knowledge_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS knowledge_fts_delete AFTER DELETE ON knowledge_entries BEGIN
+    INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content)
+      VALUES ('delete', old.rowid, old.title, old.content);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS knowledge_fts_update
+    AFTER UPDATE OF title, content ON knowledge_entries BEGIN
+    INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content)
+      VALUES ('delete', old.rowid, old.title, old.content);
+    INSERT INTO knowledge_fts(rowid, title, content)
+      VALUES (new.rowid, new.title, new.content);
+  END;
+`;
+
 export function applySchema(db: Database.Database): void {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA_SQL);
   db.exec(FTS_SQL);
+  db.exec(KNOWLEDGE_SCHEMA_SQL);
+  db.exec(KNOWLEDGE_FTS_SQL);
 }

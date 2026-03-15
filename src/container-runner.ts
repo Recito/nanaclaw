@@ -33,18 +33,32 @@ import {
   buildMemoryContext,
   buildCrossChannelSummary,
 } from './memory/context-builder.js';
+import { buildStateFile } from './state-builder.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+const VALUES_TEMPLATE = `# Values & Preferences
+
+<!-- Updated during end-of-day reflection. Contains crystallized observations about communication, relationships, and principles that have emerged over multiple sessions. -->
+
+## Communication Style
+
+## Relationship Observations
+
+## Principles
+`;
+
 /**
- * Initialize per-group memory DB and write memory context file for auto-injection.
+ * Initialize per-group memory DB, write memory context, STATE.md, and ensure
+ * self-files exist for auto-injection into the agent's system prompt.
  */
 function initMemoryForAgent(
   groupFolder: string,
   groupDir: string,
   prompt: string,
+  chatJid: string,
 ): void {
   try {
     // Ensure memory.db exists (schema applied on open)
@@ -65,6 +79,18 @@ function initMemoryForAgent(
       } catch {
         /* ignore */
       }
+    }
+
+    // Build STATE.md with mechanical stats (preserves agent-written subjective fields)
+    const stateContent = buildStateFile(groupFolder, groupDir, chatJid);
+    fs.writeFileSync(path.join(groupDir, 'STATE.md'), stateContent);
+
+    // Ensure VALUES.md exists in global dir (create template if missing)
+    const globalDir = path.join(GROUPS_DIR, 'global');
+    const valuesPath = path.join(globalDir, 'VALUES.md');
+    if (!fs.existsSync(valuesPath)) {
+      fs.mkdirSync(globalDir, { recursive: true });
+      fs.writeFileSync(valuesPath, VALUES_TEMPLATE);
     }
   } catch (err) {
     logger.debug({ err, groupFolder }, 'Failed to initialize memory for agent');
@@ -339,8 +365,8 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Initialize per-group memory database and build context
-  initMemoryForAgent(group.folder, groupDir, input.prompt);
+  // Initialize per-group memory database, build context, and generate self-files
+  initMemoryForAgent(group.folder, groupDir, input.prompt, input.chatJid);
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

@@ -131,11 +131,12 @@ export async function runHostAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Initialize per-group memory database and build context
+  // Initialize per-group memory database, build context, STATE.md, and self-files
   try {
     const { getMemoryDb } = await import('./memory/db.js');
     const { buildMemoryContext, buildCrossChannelSummary } =
       await import('./memory/context-builder.js');
+    const { buildStateFile } = await import('./state-builder.js');
     getMemoryDb(groupDir);
     const context = buildMemoryContext(group.folder, input.prompt, groupDir);
     const crossChannel = buildCrossChannelSummary(group.folder);
@@ -149,6 +150,21 @@ export async function runHostAgent(
       } catch {
         /* ignore */
       }
+    }
+
+    // Build STATE.md with mechanical stats (preserves agent-written subjective fields)
+    const stateContent = buildStateFile(group.folder, groupDir, input.chatJid);
+    fs.writeFileSync(path.join(groupDir, 'STATE.md'), stateContent);
+
+    // Ensure VALUES.md exists in global dir
+    const globalMemDir = path.join(GROUPS_DIR, 'global');
+    const valuesPath = path.join(globalMemDir, 'VALUES.md');
+    if (!fs.existsSync(valuesPath)) {
+      fs.mkdirSync(globalMemDir, { recursive: true });
+      fs.writeFileSync(
+        valuesPath,
+        `# Values & Preferences\n\n<!-- Updated during end-of-day reflection. -->\n\n## Communication Style\n\n## Relationship Observations\n\n## Principles\n`,
+      );
     }
   } catch (err) {
     logger.debug({ err }, 'Failed to initialize memory for host agent');

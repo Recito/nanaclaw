@@ -104,6 +104,14 @@ function checkDeepWorkContinuation(): string | null {
       ? `\nWas working on: ${state.current}`
       : '';
 
+    // Stronger nudge when lots of time remains
+    const urgency =
+      remainingMin > 120
+        ? `\n\nIMPORTANT: You have ${Math.round(remainingMin / 60)} hours left. Do NOT wrap up or mark the session complete. Find new angles, run more experiments, go deeper. The user gave you this time — use it all.`
+        : remainingMin > 30
+          ? `\n\nYou still have ${remainingMin} minutes. Keep working — don't stop early.`
+          : '';
+
     return [
       `[DEEP WORK CONTINUATION — Your context was compacted but your deep work session is still active]`,
       ``,
@@ -113,7 +121,7 @@ function checkDeepWorkContinuation(): string | null {
       `• Plan: ${state.plan.join(' → ')}`,
       `${completedStr}${currentStr}`,
       ``,
-      `Run \`date\` to verify current time, then continue working. Do NOT re-announce the plan or re-read the full codebase — pick up where you left off.`,
+      `Run \`date\` to verify current time, then continue working. Do NOT re-announce the plan or re-read the full codebase — pick up where you left off.${urgency}`,
     ].join('\n');
   } catch (err) {
     log(
