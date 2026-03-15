@@ -259,9 +259,7 @@ export function buildMemoryContext(
  * Build a summary of recent activity in OTHER channels.
  * Scans conversation files from today/yesterday in sibling group directories.
  */
-export function buildCrossChannelSummary(
-  currentGroupFolder: string,
-): string {
+export function buildCrossChannelSummary(currentGroupFolder: string): string {
   try {
     const today = new Date();
     const yesterday = new Date(today);
@@ -281,19 +279,28 @@ export function buildCrossChannelSummary(
       const convDir = path.join(GROUPS_DIR, dir, 'conversations');
       if (!fs.existsSync(convDir)) continue;
 
-      const files = fs.readdirSync(convDir).filter(
-        (f) => f.endsWith('.md') && (f.startsWith(todayStr) || f.startsWith(yesterdayStr)),
-      );
+      const files = fs
+        .readdirSync(convDir)
+        .filter(
+          (f) =>
+            f.endsWith('.md') &&
+            (f.startsWith(todayStr) || f.startsWith(yesterdayStr)),
+        );
       if (files.length === 0) continue;
 
       // Extract conversation summaries from filenames
       const summaries = files.map((f) => {
-        const name = f.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/\.md$/, '').replace(/-/g, ' ');
+        const name = f
+          .replace(/^\d{4}-\d{2}-\d{2}-/, '')
+          .replace(/\.md$/, '')
+          .replace(/-/g, ' ');
         return name;
       });
 
       const channelName = dir.replace(/_/g, ' ').replace(/^discord /, '#');
-      entries.push(`• ${channelName}: ${files.length} conversation(s) — ${summaries.slice(0, 3).join(', ')}`);
+      entries.push(
+        `• ${channelName}: ${files.length} conversation(s) — ${summaries.slice(0, 3).join(', ')}`,
+      );
     }
 
     if (entries.length === 0) return '';

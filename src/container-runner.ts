@@ -29,7 +29,10 @@ import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { getMemoryDb } from './memory/db.js';
-import { buildMemoryContext, buildCrossChannelSummary } from './memory/context-builder.js';
+import {
+  buildMemoryContext,
+  buildCrossChannelSummary,
+} from './memory/context-builder.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';

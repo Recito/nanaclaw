@@ -459,9 +459,7 @@ export async function processTaskIpc(
           .prepare(
             `SELECT id, access_count FROM memory_items WHERE content_hash = ? AND group_folder = 'global' AND status = 'active'`,
           )
-          .get(contentHash) as
-          | { id: string; access_count: number }
-          | undefined;
+          .get(contentHash) as { id: string; access_count: number } | undefined;
 
         if (existing) {
           globalDb
@@ -515,7 +513,9 @@ export async function processTaskIpc(
         const globalDir = path.join(GROUPS_DIR, 'global');
         const globalDb = getMemoryDb(globalDir);
         const result = globalDb
-          .prepare(`DELETE FROM memory_items WHERE id = ? AND group_folder = 'global'`)
+          .prepare(
+            `DELETE FROM memory_items WHERE id = ? AND group_folder = 'global'`,
+          )
           .run(data.memory_id);
         if (result.changes > 0) {
           logger.info(

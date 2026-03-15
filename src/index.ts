@@ -239,12 +239,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       // Suppress duplicate acknowledgments — agent already sent content via send_message
-      const isDuplicateAck = /^(No response requested|already (sent|reported|responded)|results already sent)/i.test(text);
+      const isDuplicateAck =
+        /^(No response requested|already (sent|reported|responded)|results already sent)/i.test(
+          text,
+        );
       if (text && !isDuplicateAck) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       } else if (isDuplicateAck) {
-        logger.debug({ group: group.name }, 'Suppressed duplicate acknowledgment output');
+        logger.debug(
+          { group: group.name },
+          'Suppressed duplicate acknowledgment output',
+        );
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();

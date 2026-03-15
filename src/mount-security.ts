@@ -304,7 +304,8 @@ export function validateMount(
 
   if (requestedReadWrite) {
     // Accept both "readWrite" (config JSON) and "allowReadWrite" (legacy)
-    const rootAllowsRW = allowedRoot.readWrite === true || allowedRoot.allowReadWrite === true;
+    const rootAllowsRW =
+      allowedRoot.readWrite === true || allowedRoot.allowReadWrite === true;
 
     if (!rootAllowsRW) {
       // Root doesn't allow read-write
